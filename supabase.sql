@@ -58,6 +58,9 @@ create policy s_write on public.kcm_store for all
 do $$ begin
   alter publication supabase_realtime add table public.kcm_store;
 exception when duplicate_object then null; end $$;
+alter table public.kcm_store replica identity full;
+grant select, insert, update, delete on public.kcm_store, public.kcm_members to authenticated;
+grant execute on function public.kcm_role(), public.kcm_org(), public.kcm_email() to authenticated;
 
 -- 최초 시스템 관리자 (본인 Gmail로 변경)
 insert into public.kcm_members (email, org_id, role)
