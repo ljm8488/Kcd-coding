@@ -4,8 +4,10 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import json
 import os
 import random
+import time
 from pathlib import Path
 
 import httpx
@@ -168,6 +170,7 @@ NAV = [("search", "검색 · 코드 생성", "search", "/search"),
        ("kcd", "KCD 데이터", "storage", "/kcd")]
 NAV_ROLES = {"dash": ("sysadmin", "orgadmin"), "users": ("sysadmin", "orgadmin"), "kcd": ("sysadmin",)}
 TITLES = {k: t for k, t, _, _ in NAV}
+TITLES["password"] = "비밀번호 변경"
 NAV_INFO = {k: (icon, href) for k, _, icon, href in NAV}
 NAV_GROUPS = [("조회", ["search", "index", "nlp"]), ("내 작업", ["history", "favs"]), ("관리", ["dash", "users", "kcd"])]
 SCOPE_SHORT = {"sysadmin": "시스템 전체 관리", "orgadmin": "소속 기관 관리", "user": "시스템 사용"}
@@ -298,13 +301,17 @@ def account_panel(dm, u: dict) -> None:
         with ui.row().classes("w-full items-center justify-between no-wrap"):
             ui.label(u.get("id", "")).classes("text-muted mono").style(
                 "font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
-            ui.button("로그아웃", on_click=logout).props("flat dense no-caps").style("color:var(--color-accent)")
+            with ui.row().classes("items-center gap-1 no-wrap"):
+                ui.button("비밀번호 변경", on_click=lambda: ui.navigate.to("/password")).props("flat dense no-caps").style("color:var(--muted);font-size:12px")
+                ui.button("로그아웃", on_click=logout).props("flat dense no-caps").style("color:var(--color-accent)")
 
 
 def layout(active: str) -> None:
     """원본과 같은 구성 — 상단 헤더(K 로고) + 경로 표시줄 + 그룹형 왼쪽 메뉴(하단 계정 패널) + 본문. 이후 요소는 본문에 들어간다."""
     u = user()
     dm = apply_theme()
+    if u.get("tempPw") and active != "password":   # 임시 비밀번호로 들어왔으면 먼저 비밀번호를 바꾸게 한다
+        ui.navigate.to("/password")
     with ui.element("header").classes("kcm-header"):
         with ui.element("div").classes("kcm-header-in"):
             ui.button(icon="menu").props("flat round dense").classes("kcm-menu-btn").style("color:var(--color-text)").on(
@@ -425,6 +432,51 @@ def logout() -> None:
 
 
 # ───────────────────────── 로그인 ─────────────────────────
+_FAILS: dict[str, list[float]] = {}     # 로그인 실패 기록 {키: [시각…]} — 무차별 대입 방지
+MAX_FAIL, FAIL_WINDOW, IP_MAX_FAIL = 5, 600, 25
+
+
+def client_ip() -> str:
+    try:
+        h = ui.context.client.request.headers
+        return (h.get("x-forwarded-for") or "").split(",")[0].strip() or ui.context.client.request.client.host
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
+def _recent(key: str) -> list[float]:
+    now = time.time()
+    lst = [t for t in _FAILS.get(key, []) if now - t < FAIL_WINDOW]
+    if lst:
+        _FAILS[key] = lst
+    else:
+        _FAILS.pop(key, None)
+    return lst
+
+
+def login_wait(ip: str, ident: str) -> int:
+    """잠금 중이면 남은 분(올림), 아니면 0"""
+    for key, limit in ((f"id|{ident}", MAX_FAIL), (f"ip|{ip}", IP_MAX_FAIL)):
+        lst = _recent(key)
+        if len(lst) >= limit:
+            return max(1, -(-int(lst[0] + FAIL_WINDOW - time.time()) // 60))
+    return 0
+
+
+def login_failed(ip: str, ident: str) -> None:
+    for key in (f"id|{ident}", f"ip|{ip}"):
+        _FAILS.setdefault(key, []).append(time.time())
+
+
+def upgrade_password(u: dict, pw: str) -> None:
+    """기존(약한) 해시로 로그인에 성공하면 안전한 해시로 바꿔 저장한다."""
+    try:
+        from .phase6 import save_password
+        save_password(u["id"], pw, temp=bool(u.get("pwTemp")))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @ui.page("/login")
 def login_page() -> None:
     if user():
@@ -432,8 +484,7 @@ def login_page() -> None:
         return
     orgs = [o for o in store.orgs() if o.get("active", True)]
     org_opts = {o["id"]: o["name"] for o in orgs}
-    state = {"mode": "emp", "org": next(iter(org_opts), ""), "id": app.storage.user.get("saved_id", ""), "pw": "",
-             "save": bool(app.storage.user.get("saved_id"))}
+    state = {"mode": "emp", "org": next(iter(org_opts), ""), "id": "", "pw": "", "save": False}
     MODES = {"emp": ("사번", "사번", "예: 1001"), "gmail": ("Gmail", "Gmail 주소", "name@gmail.com"),
              "admin": ("시스템 관리자", "관리자 ID", "admin")}
 
@@ -451,7 +502,8 @@ def login_page() -> None:
                     ui.label("⚠ SUPABASE_URL / SUPABASE_KEY 설정이 없어 계정을 불러올 수 없습니다.").style("color:var(--bad);font-size:13px")
                 with ui.column().classes("w-full gap-1"):
                     ui.label("소속기관").style("font-size:12px;color:var(--muted)")
-                    ui.select(org_opts, value=state["org"]).props("dense outlined").classes("w-full").bind_value(state, "org")
+                    org_sel = ui.select(org_opts, value=state["org"]).props("dense outlined").classes("w-full")
+                    org_sel.bind_value(state, "org")
                 with ui.column().classes("w-full gap-1"):
                     ui.label("로그인 방식").style("font-size:12px;color:var(--muted)")
                     with ui.element("div").style("display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%"):
@@ -467,7 +519,12 @@ def login_page() -> None:
                 ui.label("비밀번호").style("font-size:12px;color:var(--muted);margin-bottom:-12px")
                 pw = ui.input(password=True, password_toggle_button=True, placeholder="비밀번호").props("dense outlined").classes("w-full").bind_value(state, "pw")
 
+                # 로그인 방식(사번 / Gmail / 시스템 관리자)마다 아이디를 따로 저장·복원한다 — 이 PC의 브라우저(localStorage)에 보관, 비밀번호는 저장하지 않음
+                saved_ids: dict[str, str] = {}      # 저장된 아이디 {방식: 아이디}
+                typed: dict[str, str] = {}          # 이 화면에서 입력 중인 값 (방식을 바꿨다 돌아와도 유지)
+
                 def set_mode(k: str) -> None:
+                    typed[state["mode"]] = state["id"]
                     state["mode"] = k
                     lbl_id.set_text(MODES[k][1])
                     ident.props(f'placeholder="{MODES[k][2]}"')
@@ -475,25 +532,85 @@ def login_page() -> None:
                         on = kk == k
                         b.style("background:var(--a100);border-color:var(--color-accent);color:var(--a800);font-weight:600" if on
                                 else "background:var(--surface);border-color:var(--color-divider);color:var(--color-text);font-weight:400")
+                    ident.set_value(typed.get(k) or saved_ids.get(k, ""))      # 이 방식에 저장된 아이디를 채운다
+                    chk.set_value(bool(saved_ids.get(k)))
+                    forget_btn.set_visibility(bool(saved_ids.get(k)))
                 for k, b in mode_btns.items():
                     b.on("click", lambda _, k=k: set_mode(k))
-                set_mode("emp")
                 with ui.row().classes("w-full items-center justify-between"):
-                    ui.checkbox("아이디 저장").bind_value(state, "save").style("font-size:13px")
+                    chk = ui.checkbox("아이디 저장").bind_value(state, "save").style("font-size:13px")
+                    forget_btn = ui.button("저장된 아이디 지우기", on_click=lambda: forget()).props("flat dense no-caps").style(
+                        "font-size:12px;color:var(--color-accent)")
+                    forget_btn.set_visibility(False)
+                set_mode("emp")
 
-                def do_login() -> None:
+                async def load_saved() -> None:
+                    try:
+                        raw = await ui.run_javascript("return localStorage.getItem('kcm_login')", timeout=5)
+                        d = json.loads(raw) if raw else None
+                    except Exception:  # noqa: BLE001
+                        return
+                    if not isinstance(d, dict):
+                        return
+                    ids = d.get("ids") if isinstance(d.get("ids"), dict) else {}
+                    if d.get("id") and d.get("mode") in MODES:          # 이전 저장 형식(방식 하나) 호환
+                        ids.setdefault(d["mode"], d["id"])
+                    saved_ids.update({k: str(v) for k, v in ids.items() if k in MODES and v})
+                    if not saved_ids:
+                        return
+                    if d.get("org") in org_opts:
+                        org_sel.set_value(d["org"])
+                    last = d.get("mode") if d.get("mode") in MODES else next(iter(saved_ids))
+                    typed.pop(last, None)
+                    set_mode(last)
+                    pw.run_method("focus")
+                ui.timer(0.3, load_saved, once=True)
+
+                def forget() -> None:
+                    """지금 선택한 방식의 저장된 아이디만 지운다"""
+                    k = state["mode"]
+                    saved_ids.pop(k, None)
+                    typed.pop(k, None)
+                    ui.run_javascript("(function(){var d={};try{d=JSON.parse(localStorage.getItem('kcm_login')||'{}')||{}}catch(e){}"
+                                      f"d.ids=d.ids||{{}};delete d.ids[{json.dumps(k)}];delete d.id;"
+                                      "if(Object.keys(d.ids).length){localStorage.setItem('kcm_login',JSON.stringify(d))}else{localStorage.removeItem('kcm_login')}})()")
+                    ident.set_value("")
+                    chk.set_value(False)
+                    forget_btn.set_visibility(False)
+                    ui.notify(f"{MODES[k][0]} 아이디를 지웠습니다.")
+
+                async def do_login() -> None:
                     accounts, all_orgs, sysad = store.get_many([("global", "accounts", []), ("global", "orgs", []), ("global", "sysAdmin", None)], fresh=True)
+                    ip, ident_key = client_ip(), f"{state['mode']}|{state['id'].strip().lower()}"
+                    wait = login_wait(ip, ident_key)
+                    if wait:
+                        err.set_text(f"로그인 시도가 너무 많습니다. {wait}분 뒤에 다시 시도하세요.")
+                        err.style("display:block")
+                        return
                     u, msg = authenticate(state["mode"], state["id"], state["pw"], state["org"], accounts or [], all_orgs or [], sysad)
                     if not u:
+                        login_failed(ip, ident_key)
                         err.set_text(msg)
                         err.style("display:block")
                         return
+                    _FAILS.pop(f"id|{ident_key}", None)
                     u["tempPw"] = u.pop("pwTemp", False)
+                    if u.pop("legacyPw", False):
+                        upgrade_password(u, state["pw"])
                     app.storage.user["user"] = u
-                    if state["save"]:
-                        app.storage.user["saved_id"] = state["id"]
-                    else:
-                        app.storage.user.pop("saved_id", None)
+                    try:
+                        k = state["mode"]
+                        if state["save"] and state["id"].strip():
+                            saved_ids[k] = state["id"].strip()
+                        else:
+                            saved_ids.pop(k, None)           # 체크를 끄면 이 방식의 저장값만 지운다
+                        if saved_ids:
+                            payload = json.dumps({"mode": k, "org": state["org"], "ids": saved_ids}, ensure_ascii=False)
+                            await ui.run_javascript(f"localStorage.setItem('kcm_login', {json.dumps(payload)})", timeout=5)
+                        else:
+                            await ui.run_javascript("localStorage.removeItem('kcm_login')", timeout=5)
+                    except Exception:  # noqa: BLE001
+                        pass
                     ui.navigate.to("/search")
 
                 pw.on("keydown.enter", do_login)
@@ -730,6 +847,52 @@ from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
 app.add_middleware(GZipMiddleware, minimum_size=1024)   # 화면 · 스크립트를 압축해서 보낸다 (전송량 1/3~1/5)
 
 
+# ── 연결 안정성 ──────────────────────────────────────────────
+# 화면은 웹소켓으로 서버와 계속 이야기한다. 아래 설정으로 일시적인 지연·절전·프록시 유휴 끊김에도 연결이 유지되게 한다.
+from nicegui import core  # noqa: E402
+
+core.sio.eio.ping_interval = 15   # 15초마다 연결 확인 신호 → 중간 프록시가 "놀고 있는 연결"로 보고 끊지 않게 함 (기본 25초)
+core.sio.eio.ping_timeout = 90    # 응답이 90초까지 늦어도 끊지 않음 — 브라우저 탭 절전·잠깐의 서버 정체 대비 (기본 20초)
+
+
+@app.get("/healthz")
+def healthz() -> dict:
+    """살아 있는지 확인용 (외부 모니터링 · 서버 자체 깨우기 신호가 호출)"""
+    return {"ok": True}
+
+
+def _keepalive() -> None:
+    """Render 무료 플랜은 15분 동안 요청이 없으면 서버를 재우고 그때마다 연결이 끊긴다.
+    서버가 깨어 있는 동안 9분마다 자기 주소로 가벼운 요청을 보내 잠들지 않게 한다. (RENDER_EXTERNAL_URL 은 Render가 자동으로 넣어 준다.)"""
+    url = (os.environ.get("KEEPALIVE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if not url:
+        return
+    import threading
+    import time as _t
+
+    def loop() -> None:
+        while True:
+            _t.sleep(540)
+            try:
+                httpx.get(url + "/healthz", timeout=20)
+            except Exception:  # noqa: BLE001
+                pass
+    threading.Thread(target=loop, daemon=True).start()
+
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    resp = await call_next(request)
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "SAMEORIGIN")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), clipboard-read=(self), clipboard-write=(self)")
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
+
+
 def _warm() -> None:
     import threading
     def go() -> None:
@@ -739,14 +902,18 @@ def _warm() -> None:
         except Exception:  # noqa: BLE001
             pass
     threading.Thread(target=go, daemon=True).start()
+    _keepalive()
 
 
 app.on_startup(_warm)
 
-from . import phase2, phase3, phase4, phase5  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드 / 4단계: 검색·정밀 분석)
+from . import phase2, phase3, phase4, phase5, phase6  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드 / 4단계: 검색·정밀 분석)
 
 
 def run() -> None:
-    port =int(os.environ.get("PORT", "8080"))
-    ui.run(title="심사 코딩마스터", host="0.0.0.0", port=port, reload=False, show=False,
-           storage_secret=os.environ.get("STORAGE_SECRET", "change-me-in-production"), language="ko-KR")
+    port = int(os.environ.get("PORT", "8080"))
+    secret = os.environ.get("STORAGE_SECRET", "")
+    if not secret and (os.environ.get("RENDER") or os.environ.get("PRODUCTION")):
+        raise SystemExit("운영 환경에서는 STORAGE_SECRET(임의의 긴 문자열) 환경변수가 반드시 필요합니다.")
+    ui.run(title="심사 코딩마스터", host="0.0.0.0", port=port, reload=False, show=False, reconnect_timeout=60,
+           storage_secret=secret or "dev-only-not-for-production", language="ko-KR")
