@@ -81,6 +81,7 @@ class Family:
     def __init__(self, idx):
         self.names = {r.code.upper(): r.ko for r in idx.rows}
         self.keys = sorted(self.names)
+        self.prefixes = {k[:i] for k in self.keys for i in range(1, len(k))}   # 하위 코드 여부를 즉시 판단
 
     def known(self, code: str) -> bool:
         return _c(code) in self.names
@@ -91,13 +92,24 @@ class Family:
         return [k for k in fam if not any(m != k and k.startswith(m) for m in fam)]
 
     def has_child(self, code: str) -> bool:
-        code = _c(code)
-        return any(k != code and k.startswith(code) for k in self.keys)
+        return _c(code) in self.prefixes
 
     def alts(self, code: str, sex: str, age: int | None) -> list[str]:
         root = _c(code)[:3]
         return [k for k in self.keys if k != _c(code) and k.startswith(root) and not self.has_child(k)
                 and not sex_issue(k, sex) and not age_issue(k, age)][:6]
+
+
+_FAM: dict = {}
+
+
+def get_family(idx) -> "Family":
+    """마스터가 같으면 하위 코드 표를 다시 만들지 않는다"""
+    f = _FAM.get(id(idx))
+    if f is None:
+        _FAM.clear()
+        f = _FAM[id(idx)] = Family(idx)
+    return f
 
 
 def check_claim(rows: list[dict], sex: str, age: int | None, fam: Family) -> list[dict]:

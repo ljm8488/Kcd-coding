@@ -85,7 +85,7 @@ body{--q-primary:var(--color-accent)}
 .kcm-shell{flex:1;width:100%;max-width:1400px;margin:0 auto;display:flex;align-items:flex-start;flex-wrap:nowrap}
 .kcm-side{flex:none;width:250px;position:sticky;top:96px;align-self:flex-start;margin:24px 0 24px 20px;
  background:var(--surface);box-shadow:var(--elev-1);border:1px solid var(--color-divider);border-radius:10px;
- height:calc((100vh - 148px) / var(--z,1));display:flex;flex-direction:column;overflow:hidden;padding:0}
+ height:calc(100vh / var(--z,1) - 148px);display:flex;flex-direction:column;overflow:hidden;padding:0}
 .kcm-side-top{flex:1;min-height:0;overflow-y:auto;padding:10px 0 14px;display:grid;gap:12px;align-content:start}
 .kcm-side-head{display:flex;align-items:center;margin:0 10px;padding-bottom:8px;border-bottom:1px solid var(--color-divider)}
 .kcm-side-head b{flex:1;font-family:var(--font-heading);font-size:15px;letter-spacing:.04em;color:var(--n800)}
@@ -170,17 +170,74 @@ NAV_GROUPS = [("조회", ["search", "index", "nlp"]), ("내 작업", ["history",
 SCOPE_SHORT = {"sysadmin": "시스템 전체 관리", "orgadmin": "소속 기관 관리", "user": "시스템 사용"}
 
 
+UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols")
+
+
+def load_ui_pref() -> None:
+    """로그인한 사용자의 화면 설정(라이트/다크 · 크기 · 퍼즐 배치)을 DB에서 불러온다 — 어느 PC에서든 같은 화면으로 시작."""
+    u = user()
+    if not u or app.storage.user.get("pref_for") == u["id"]:
+        return
+    try:
+        p = store.get(f"user:{u['id']}", "uiPref", {}, fresh=True) or {}
+    except Exception:  # noqa: BLE001
+        p = {}
+    for k in UI_PREF_KEYS:
+        if k in p:
+            app.storage.user[k] = p[k]
+    app.storage.user["pref_for"] = u["id"]
+
+
+def save_ui_pref(**kw) -> None:
+    """화면 설정을 사용자별로 DB에 저장한다 (백그라운드로 — 화면이 멈추지 않게)."""
+    u = user()
+    if not u:
+        return
+    import threading
+    uid = u["id"]
+
+    def _w() -> None:
+        try:
+            p = dict(store.get(f"user:{uid}", "uiPref", {}, fresh=True) or {})
+            p.update(kw)
+            store.put(f"user:{uid}", "uiPref", p, by=uid)
+        except Exception:  # noqa: BLE001
+            pass
+    threading.Thread(target=_w, daemon=True).start()
+
+
 def apply_theme():
-    """라이트/다크 · 화면 크기 — 선택을 브라우저별로 기억한다 (기본: 라이트)."""
+    """라이트/다크 · 화면 크기 — 사용자별로 저장해 두었다가 항상 그 설정으로 시작한다 (기본: 라이트)."""
+    load_ui_pref()
     ui.add_head_html('<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" '
                      'href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600'
                      '&family=Noto+Sans+KR:wght@400;500;700&display=swap">')
     app.storage.user.setdefault("dark", False)
     dm = ui.dark_mode().bind_value(app.storage.user, "dark")
+    ui.add_body_html("""<script>(function(){var d=null;
+document.addEventListener('dragstart',function(e){var t=e.target.closest&&e.target.closest('[data-dnd]');if(!t)return;d=t;
+ e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',t.dataset.key);t.classList.add('dnd-dragging');});
+document.addEventListener('dragend',function(){document.querySelectorAll('.dnd-dragging,.dnd-over').forEach(function(x){x.classList.remove('dnd-dragging','dnd-over')});d=null;});
+document.addEventListener('dragover',function(e){var t=e.target.closest&&e.target.closest('[data-dnd]');if(!d||!t||t.dataset.dnd!==d.dataset.dnd)return;
+ e.preventDefault();document.querySelectorAll('.dnd-over').forEach(function(x){x.classList.remove('dnd-over')});if(t!==d)t.classList.add('dnd-over');});
+document.addEventListener('drop',function(e){var t=e.target.closest&&e.target.closest('[data-dnd]');if(!d||!t||t.dataset.dnd!==d.dataset.dnd||t===d)return;e.preventDefault();
+ var g=d.dataset.dnd,keys=Array.prototype.map.call(document.querySelectorAll('[data-dnd="'+g+'"]'),function(x){return x.dataset.key});
+ var dk=d.dataset.key,tk=t.dataset.key;keys.splice(keys.indexOf(dk),1);keys.splice(keys.indexOf(tk),0,dk);emitEvent('dnd_reorder',{group:g,order:keys});});})();</script>""")
+    ui.add_body_html("""<script>document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-kact]');
+if(!b)return;emitEvent('kcm_act',{act:b.dataset.kact,code:b.dataset.code});});</script>""")
     ui.add_css(THEME_CSS)
     app.storage.user.setdefault("zoom", 100)
     z0 = int(app.storage.user["zoom"])
-    ui.add_css(f"body{{zoom:{z0}%;--z:{z0 / 100}}}")
+    # 화면 폭에 맞춰 글자·화면을 자동 확대(--auto) + 사용자가 고른 크기(--user)를 곱한다
+    ui.add_css(""":root{--auto:1}
+@media (min-width:1280px){:root{--auto:1.08}}
+@media (min-width:1500px){:root{--auto:1.18}}
+@media (min-width:1800px){:root{--auto:1.3}}
+@media (min-width:2200px){:root{--auto:1.5}}
+@media (min-width:2800px){:root{--auto:1.8}}
+@media (min-width:3400px){:root{--auto:2.1}}
+@media (max-width:759px){:root{--auto:1.05}}""")
+    ui.add_css(f"body{{--user:{z0 / 100};--z:calc(var(--auto) * var(--user));zoom:calc(var(--auto) * var(--user))}}")
     return dm
 
 
@@ -197,10 +254,12 @@ def account_panel(dm, u: dict) -> None:
         z = max(70, min(150, z))
         app.storage.user["zoom"] = z
         zoom_lbl.set_text(f"{z}%")
-        ui.run_javascript(f"document.body.style.zoom='{z}%';document.body.style.setProperty('--z','{z / 100}')")
+        save_ui_pref(zoom=z)
+        ui.run_javascript(f"document.body.style.setProperty('--user','{z / 100}')")
 
     def set_dark(v: bool) -> None:
         dm.set_value(v)
+        save_ui_pref(dark=bool(v))
         (dark_b.classes(add="on"), light_b.classes(remove="on")) if v else (light_b.classes(add="on"), dark_b.classes(remove="on"))
 
     with ui.element("div").classes("kcm-acct"):
@@ -310,6 +369,7 @@ def coming_soon(key: str, desc: str) -> None:
 
 def logout() -> None:
     app.storage.user.pop("user", None)
+    app.storage.user.pop("pref_for", None)
     ui.navigate.to("/login")
 
 
@@ -399,149 +459,6 @@ def login_page() -> None:
 def index_page() -> None:
     ui.navigate.to("/search" if user() else "/login")
 
-
-
-# ───────────────────────── 사용자 관리 ─────────────────────────
-def _save_accounts(accounts: list[dict]) -> None:
-    store.put("global", "accounts", accounts, by=user()["id"])
-
-
-@ui.page("/users")
-def users_page() -> None:
-    if not require_login(("sysadmin", "orgadmin")):
-        return
-    layout("users")
-    me = user()
-    orgs = store.orgs()
-    org_names = {o["id"]: o["name"] for o in orgs}
-
-    @ui.refreshable
-    def listing() -> None:
-        accounts = store.accounts(fresh=True)
-        shown = [a for a in accounts if me["role"] == "sysadmin" or a.get("orgId") == me["orgId"]]
-        rows = []
-        for a in shown:
-            st = acc_status(a, orgs)
-            rows.append({"id": a["id"], "name": a.get("name", ""), "empNo": a.get("empNo", ""),
-                         "org": org_names.get(a.get("orgId"), a.get("orgId", "")),
-                         "role": ROLE_LABEL.get(a.get("role"), a.get("role", "")),
-                         "dept": a.get("dept", ""), "title": a.get("title", ""),
-                         "status": st["label"], "pw": "지정됨" if a.get("pwHash") else "미지정"})
-        t = ui.table(columns=[
-            {"name": "name", "label": "이름", "field": "name", "align": "left"},
-            {"name": "id", "label": "Gmail", "field": "id", "align": "left"},
-            {"name": "empNo", "label": "사번", "field": "empNo", "align": "left"},
-            {"name": "org", "label": "기관", "field": "org", "align": "left"},
-            {"name": "role", "label": "권한", "field": "role", "align": "left"},
-            {"name": "dept", "label": "부서", "field": "dept", "align": "left"},
-            {"name": "title", "label": "직위", "field": "title", "align": "left"},
-            {"name": "status", "label": "상태", "field": "status", "align": "left"},
-            {"name": "pw", "label": "비밀번호", "field": "pw", "align": "left"},
-        ], rows=rows, row_key="id", selection="single", pagination=20).classes("w-full")
-
-        def selected() -> dict | None:
-            return (t.selected or [None])[0]
-
-        def toggle_active() -> None:
-            s = selected()
-            if not s:
-                ui.notify("사용자를 선택하세요.", type="warning")
-                return
-            if s["id"] == me["id"]:
-                ui.notify("본인 계정은 비활성화할 수 없습니다.", type="negative")
-                return
-            accs = store.accounts(fresh=True)
-            for a in accs:
-                if a["id"] == s["id"]:
-                    a["active"] = not a.get("active", True)
-            _save_accounts(accs)
-            ui.notify("상태를 변경했습니다.")
-            listing.refresh()
-
-        def reset_pw() -> None:
-            s = selected()
-            if not s:
-                ui.notify("사용자를 선택하세요.", type="warning")
-                return
-            temp = f"{random.randint(0, 9999):04d}"
-            accs = store.accounts(fresh=True)
-            for a in accs:
-                if a["id"] == s["id"]:
-                    a.update({"pwHash": pw_key(a["id"], temp), "pwTemp": True, "demoPw": temp})
-            _save_accounts(accs)
-            ui.notify(f"{s['name']} 임시 비밀번호: {temp} (첫 로그인 후 변경하게 됩니다)", type="positive", timeout=15000, close_button=True)
-            listing.refresh()
-
-        def delete() -> None:
-            s = selected()
-            if not s:
-                ui.notify("사용자를 선택하세요.", type="warning")
-                return
-            if s["id"] == me["id"]:
-                ui.notify("본인 계정은 삭제할 수 없습니다.", type="negative")
-                return
-            with ui.dialog() as dlg, ui.card():
-                ui.label(f"{s['name']} ({s['id']}) 계정을 삭제할까요? 되돌릴 수 없습니다.")
-                with ui.row():
-                    ui.button("취소", on_click=dlg.close).props("flat")
-
-                    def ok() -> None:
-                        _save_accounts([a for a in store.accounts(fresh=True) if a["id"] != s["id"]])
-                        dlg.close()
-                        listing.refresh()
-                    ui.button("삭제", on_click=ok, color="red")
-            dlg.open()
-
-        with ui.row().classes("gap-2"):
-            ui.button("선택 사용자 활성/비활성", on_click=toggle_active)
-            ui.button("비밀번호 초기화", on_click=reset_pw)
-            ui.button("삭제", on_click=delete, color="red")
-
-    def add_dialog() -> None:
-        my_orgs = orgs if me["role"] == "sysadmin" else [o for o in orgs if o["id"] == me["orgId"]]
-        with ui.dialog() as dlg, ui.card().classes("w-96"):
-            ui.label("사용자 추가").classes("text-lg font-bold")
-            org = ui.select({o["id"]: o["name"] for o in my_orgs}, label="기관", value=my_orgs[0]["id"] if my_orgs else None)
-            name = ui.input("이름")
-            gmail = ui.input("Gmail (로그인 ID)")
-            emp = ui.input("사번")
-            dept = ui.input("부서")
-            title = ui.input("직위")
-            roles = {"user": "사용자", "orgadmin": "기관 관리자"}
-            if me["role"] == "sysadmin":
-                roles["sysadmin"] = "시스템 관리자"
-            role = ui.select(roles, label="권한", value="user")
-
-            def save() -> None:
-                gid = (gmail.value or "").strip().lower()
-                if not name.value or not is_gmail(gid):
-                    ui.notify("이름과 올바른 Gmail 주소를 입력하세요.", type="negative")
-                    return
-                accs = store.accounts(fresh=True)
-                if any(a["id"].lower() == gid for a in accs):
-                    ui.notify("이미 등록된 Gmail입니다.", type="negative")
-                    return
-                temp = f"{random.randint(0, 9999):04d}"
-                accs.append({"id": gid, "name": name.value.strip(), "empNo": (emp.value or "").strip(),
-                             "orgId": org.value, "role": role.value, "dept": dept.value or "",
-                             "title": title.value or "", "active": True, "noLimit": True,
-                             "from": "", "to": "", "last": "—",
-                             "pwHash": pw_key(gid, temp), "pwTemp": True, "demoPw": temp})
-                _save_accounts(accs)
-                dlg.close()
-                ui.notify(f"추가했습니다. 임시 비밀번호: {temp}", type="positive", timeout=15000, close_button=True)
-                listing.refresh()
-
-            with ui.row():
-                ui.button("취소", on_click=dlg.close).props("flat")
-                ui.button("저장", on_click=save)
-        dlg.open()
-
-    with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-3"):
-        with ui.row().classes("items-center justify-between w-full"):
-            ui.label("사용자 관리").classes("text-xl font-bold")
-            ui.button("사용자 추가", on_click=add_dialog)
-        listing()
 
 
 # ───────────────────────── KCD 데이터 ─────────────────────────
@@ -644,7 +561,7 @@ def _make_placeholder(key: str) -> None:
 for _k in PLACEHOLDERS:
     _make_placeholder(_k)
 
-from . import phase2, phase3, phase4  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드 / 4단계: 검색·정밀 분석)
+from . import phase2, phase3, phase4, phase5  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드 / 4단계: 검색·정밀 분석)
 
 
 def run() -> None:
