@@ -169,57 +169,6 @@ def index_page() -> None:
     ui.navigate.to("/search" if user() else "/login")
 
 
-# ───────────────────────── 검색 ─────────────────────────
-@ui.page("/search")
-def search_page() -> None:
-    if not require_login():
-        return
-    layout("search")
-    idx = get_index()
-    with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-3"):
-        ui.label("검색 · 코드 생성").classes("text-xl font-bold")
-        ui.label(f"KCD 상병 {len(idx):,}건 · 코드(예: I10, E11.9), 한글명, 영문명으로 검색합니다.").classes("text-sm text-gray-500")
-        box = ui.input(placeholder="질병명 또는 코드를 입력하세요").props("outlined clearable autofocus").classes("w-full")
-        info = ui.label("").classes("text-sm text-gray-600")
-        table = ui.table(columns=[
-            {"name": "code", "label": "코드", "field": "code", "align": "left", "sortable": True},
-            {"name": "ko", "label": "한글명", "field": "ko", "align": "left"},
-            {"name": "en", "label": "영문명", "field": "en", "align": "left"},
-        ], rows=[], row_key="code", pagination=25, selection="single").classes("w-full")
-
-        def picked() -> dict | None:
-            if not table.selected:
-                ui.notify("표에서 코드를 먼저 선택하세요.", type="warning")
-                return None
-            return table.selected[0]
-
-        def to_favs() -> None:
-            from .phase3 import add_fav
-            s = picked()
-            if s:
-                ui.notify("코드집에 담았습니다." if add_fav(s["code"], s["ko"]) else "이미 코드집에 있습니다.")
-
-        def to_history() -> None:
-            from .phase3 import add_history
-            s = picked()
-            if s:
-                add_history(box.value or "", s["code"], s["ko"])
-                ui.notify("이력에 기록했습니다.", type="positive")
-
-        with ui.row().classes("gap-2"):
-            ui.button("코드집에 담기", icon="star", on_click=to_favs).props("no-caps outline")
-            ui.button("이력에 기록", icon="history", on_click=to_history).props("no-caps outline")
-
-        def run() -> None:
-            q = box.value or ""
-            hits = idx.search(q)
-            table.rows = [{"code": r.code, "ko": r.ko, "en": r.en} for r in hits]
-            table.update()
-            info.set_text(f"{len(hits)}건" + (" (최대 200건 표시)" if len(hits) >= 200 else "") if q.strip() else "")
-
-        box.on("update:model-value", run, throttle=0.3)
-        box.on("keydown.enter", run)
-
 
 # ───────────────────────── 사용자 관리 ─────────────────────────
 def _save_accounts(accounts: list[dict]) -> None:
@@ -464,7 +413,7 @@ def _make_placeholder(key: str) -> None:
 for _k in PLACEHOLDERS:
     _make_placeholder(_k)
 
-from . import phase2, phase3  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드)
+from . import phase2, phase3, phase4  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드 / 4단계: 검색·정밀 분석)
 
 
 def run() -> None:
