@@ -56,11 +56,11 @@ def users_page() -> None:
     flt = {"org": "", "status": "", "q": ""}
 
     def my_orgs() -> list[dict]:
-        orgs = store.orgs(fresh=True)
+        orgs = store.orgs()
         return orgs if is_sys else [o for o in orgs if o["id"] == me.get("orgId")]
 
     def my_accounts() -> list[dict]:
-        accs = store.accounts(fresh=True)
+        accs = store.accounts()
         if is_sys:
             return accs
         return [a for a in accs if a.get("orgId") == me.get("orgId") and a.get("role") != "sysadmin"]
@@ -94,7 +94,7 @@ def users_page() -> None:
     def render_orgs() -> None:
         orgs_box.clear()
         orgs = my_orgs()
-        accs = store.accounts(fresh=True)
+        accs = store.accounts()
         with orgs_box:
             with ui.row().classes("w-full items-center justify-between"):
                 ui.label("기관 관리" if is_sys else "소속 기관").classes("kcm-sec-h")
@@ -316,7 +316,7 @@ def users_page() -> None:
     def render_list() -> None:
         list_box.clear()
         orgs = my_orgs()
-        all_orgs = store.orgs(fresh=True)
+        all_orgs = store.orgs()
         org_name = {o["id"]: o["name"] for o in all_orgs}
         accs = my_accounts()
         rows = []
@@ -491,7 +491,7 @@ def users_page() -> None:
     # ───────────── Google 로그인 설정 ─────────────
     def render_google() -> None:
         google_box.clear()
-        cfg = store.get("global", "authCfg", {}, fresh=True) or {}
+        cfg = store.get("global", "authCfg", {}) or {}
         with google_box:
             with ui.row().classes("w-full items-center justify-between"):
                 ui.label("Google 로그인 설정").classes("kcm-sec-h")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import collections
 import datetime as dt
+import time
 
 import httpx
 from nicegui import ui
@@ -50,7 +51,7 @@ def history_page() -> None:
 
         @ui.refreshable
         def body() -> None:
-            items = store.get(_scope(), "history", [], fresh=True) or []
+            items = store.get(_scope(), "history", []) or []
             rows = [{"i": i, **{k: str(v) for k, v in h.items()}} for i, h in enumerate(items)]
             ui.table(columns=[
                 {"name": "at", "label": "일시", "field": "at", "align": "left", "sortable": True},
@@ -84,7 +85,7 @@ def favs_page() -> None:
 
         @ui.refreshable
         def body() -> None:
-            items = store.get(_scope(), "favs", [], fresh=True) or []
+            items = store.get(_scope(), "favs", []) or []
             if not items:
                 ui.label("코드집이 비어 있습니다. 검색 화면에서 코드를 선택해 '코드집에 담기'를 누르세요.").classes("text-muted")
                 return
@@ -105,15 +106,22 @@ def favs_page() -> None:
 
 
 # ───────── 대시보드 ─────────
+_HIST_CACHE: dict = {"at": 0.0, "rows": []}
+
+
 def _all_histories() -> list[dict]:
-    r = httpx.get(f"{store.SUPABASE_URL}/rest/v1/kcm_store",
-                  params={"key": "eq.history", "select": "scope,data"}, headers=store._headers(), timeout=30)
+    """모든 사용자의 코딩 이력 — 집계라서 60초 동안은 이전 결과를 다시 쓴다 (대시보드를 열 때마다 전부 내려받지 않게)."""
+    if time.time() - _HIST_CACHE["at"] < 60 and _HIST_CACHE["rows"]:
+        return _HIST_CACHE["rows"]
+    r = store.client.get(f"{store.SUPABASE_URL}/rest/v1/kcm_store",
+                         params={"key": "eq.history", "select": "scope,data"}, timeout=60)
     r.raise_for_status()
     out = []
     for row in r.json():
         for h in row.get("data") or []:
             if isinstance(h, dict):
                 out.append({**h, "_scope": row["scope"]})
+    _HIST_CACHE.update(at=time.time(), rows=out)
     return out
 
 

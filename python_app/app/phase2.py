@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import math
 import time
 import uuid
 
@@ -272,15 +273,39 @@ window.kcmSnip=function(){
         # ── 문서 첨부 · 판독
         DOCS_LABEL = "문서 첨부 (선택) — 소견서 · 진단서 · 진료의뢰서를 파일·캡처·붙여넣기로 첨부해 판독"
         with ui.expansion(DOCS_LABEL, icon="attach_file").classes("kcm-card w-full kcm-docs").props("dense") as docs_exp:
-            ui.label("문서 첨부 — 소견서 · 진단서 · 진료의뢰서").style("font-family:var(--font-heading);font-weight:600;font-size:13px;letter-spacing:.08em")
-            with ui.row().classes("items-center w-full no-wrap gap-2").style("font-size:12px"):
-                for i, lab in enumerate(["문서 첨부", "판독 파일 선택", "판독 실행"], 1):
-                    with ui.row().classes("items-center gap-1 no-wrap"):
-                        ui.label(str(i)).style("width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:700;"
-                                               "font-size:12px;border:1px solid var(--color-accent);color:var(--color-accent)")
-                        ui.label(lab)
-                    if i < 3:
-                        ui.element("span").style("flex:1 1 24px;min-width:16px;height:1px;background:var(--color-divider)")
+            steps_row = ui.row().classes("items-center w-full no-wrap gap-2").style("font-size:12px")
+
+            def render_steps() -> None:
+                """1 문서 첨부 → 2 판독 파일 선택 → 3 판독 실행 — 사용자가 어디까지 했는지 단계마다 표시한다."""
+                docs_ = st["docs"]
+                sel_ = [d for d in docs_ if d["sel"]]
+                o = st.setdefault("ocr", "idle")
+                s1 = "done" if docs_ else "current"
+                s2 = "todo" if not docs_ else ("done" if sel_ else "current")
+                s3 = {"busy": "busy", "done": "done", "error": "error"}.get(o, "current" if sel_ else "todo")
+                labels = [("문서 첨부", f" · {len(docs_)}개" if docs_ else ""),
+                          ("판독 파일 선택", f" · {len(sel_)}개" if docs_ else ""),
+                          ("판독 실행", {"busy": " · 진행 중", "done": " · 완료", "error": " · 실패"}.get(o, ""))]
+                steps_row.clear()
+                with steps_row:
+                    for i, ((lab, extra), s_) in enumerate(zip(labels, (s1, s2, s3)), 1):
+                        with ui.row().classes("items-center gap-1 no-wrap"):
+                            circ = {"todo": "border:1px solid var(--color-divider);color:var(--muted)",
+                                    "current": "border:2px solid var(--color-accent);color:var(--color-accent);background:var(--a100)",
+                                    "done": "border:1px solid var(--color-accent);background:var(--color-accent);color:#fff",
+                                    "busy": "border:2px solid var(--color-accent);color:var(--color-accent)",
+                                    "error": "border:1px solid var(--warn);color:var(--warn)"}[s_]
+                            with ui.element("span").style("width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:12px;" + circ):
+                                if s_ == "busy":
+                                    ui.html('<i class="kcm-spin"></i>')
+                                else:
+                                    ui.label({"done": "✓", "error": "!"}.get(s_, str(i)))
+                            ui.label(lab + extra).style("white-space:nowrap;" + ("font-weight:700;color:var(--color-accent)" if s_ in ("current", "busy") else
+                                                                                    ("color:var(--muted)" if s_ == "todo" else "")))
+                        if i < 3:
+                            nxt = (s1, s2, s3)[i - 1]
+                            ui.element("span").style("flex:1 1 24px;min-width:16px;height:2px;border-radius:1px;background:"
+                                                     + ("var(--color-accent)" if nxt == "done" else "var(--color-divider)"))
             with ui.row().classes("w-full gap-3 items-stretch").style("flex-wrap:wrap"):
                 up = ui.upload(on_upload=lambda e: on_upload(e), multiple=True, auto_upload=True) \
                     .props("accept=.pdf,.jpg,.jpeg,.png,.txt").style("position:absolute;width:0;height:0;overflow:hidden;opacity:0")
@@ -343,6 +368,7 @@ window.kcmSnip=function(){
                 dlg.open()
 
             def render_docs() -> None:
+                render_steps()
                 docs_exp._props["label"] = DOCS_LABEL + (f"  ·  첨부 {len(st['docs'])}개" if st["docs"] else "")
                 docs_exp.update()
                 docs_box.clear()
@@ -354,7 +380,7 @@ window.kcmSnip=function(){
                     ui.label(f"첨부 {len(st['docs'])}개 · 선택 {sum(1 for d in st['docs'] if d['sel'])}개").classes("text-muted").style("font-size:12px")
                     for d in st["docs"]:
                         with ui.row().classes("items-center no-wrap gap-2 w-full").style("border:1px solid var(--color-divider);border-radius:8px;padding:4px 8px"):
-                            ui.checkbox(value=d["sel"], on_change=lambda e, d=d: d.update(sel=e.value))
+                            ui.checkbox(value=d["sel"], on_change=lambda e, d=d: (d.update(sel=e.value), render_steps()))
                             thumb = ui.element("div").style("flex:none;width:52px;height:42px;border:1px solid var(--color-divider);border-radius:6px;overflow:hidden;"
                                                             "display:grid;place-items:center;cursor:zoom-in;background:var(--surface-2)")
                             with thumb:
@@ -365,7 +391,9 @@ window.kcmSnip=function(){
                             thumb.on("click", lambda _, d=d: open_preview(d))
                             with ui.column().classes("gap-0 grow").style("min-width:0"):
                                 ui.label(d["name"]).style("font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
-                                ui.label(f"{len(d['data']) / 1024:,.0f} KB · {d['state']}").classes("text-muted mono").style("font-size:11px")
+                                ui.label(f"{len(d['data']) / 1024:,.0f} KB · {d['state']}" + (f" · {d['pct']}%" if d.get("pct") is not None and d['state'] == "판독 중" else "")).classes("text-muted mono").style("font-size:11px")
+                                if d.get("pct") is not None and d["state"] == "판독 중":
+                                    ui.linear_progress(value=d["pct"] / 100, show_value=False, size="4px").props("rounded").classes("w-full")
                             ui.button(icon="visibility", on_click=lambda _, d=d: open_preview(d)).props("flat round dense size=sm").tooltip("미리보기")
                             ui.button(icon="close", on_click=lambda _, d=d: drop_doc(d)).props("flat round dense size=sm").tooltip("삭제")
 
@@ -375,27 +403,54 @@ window.kcmSnip=function(){
                 raw = await f.read() if f else e.content.read()
                 mime = ocr.guess_mime(name, getattr(f, "content_type", "") if f else getattr(e, "type", ""))
                 st["docs"].append({"name": name, "mime": mime, "data": raw, "sel": True, "state": "대기", "token": tmp_put(raw, mime)})
+                st["ocr"] = "idle"
                 docs_exp.set_value(True)
                 render_docs()
 
-            with ui.row().classes("items-end gap-3 w-full").style("border-top:1px solid var(--color-divider);padding-top:12px"):
-                eng = ui.select(ocr.ENGINES, value="gemini", label="판독 엔진").props("dense outlined").classes("w-72")
-                vkey = ui.input("Vision API 키", password=True).props("dense outlined").classes("w-64")
-                vkey.bind_visibility_from(eng, "value", backward=lambda v: v == "vision")
-                lang = ui.select({"ko+en": "한국어 + 영어", "ko": "한국어", "en": "영어"}, value="ko+en", label="인식 언어").props("dense outlined").classes("w-40")
-                ocr_btn = ui.button("판독 실행").props("no-caps unelevated color=primary")
+            def clear_docs() -> None:
+                for d_ in st["docs"]:
+                    _TMP.pop(d_.get("token"), None)
+                st["docs"].clear()
+                st["ocr"] = "idle"
+                up.reset()
+                render_docs()
 
-                def clear_docs() -> None:
-                    for d_ in st["docs"]:
-                        _TMP.pop(d_.get("token"), None)
-                    st["docs"].clear()
-                    up.reset()
-                    render_docs()
-                ui.button("첨부 비우기", on_click=clear_docs).props("no-caps flat").style("color:var(--color-accent)")
-            ui.label("ⓘ 판독 안내 — 이미지·PDF는 판독을 실행할 때만 서버를 거쳐 선택한 제공자(Gemini 또는 Google)로 전송됩니다. "
-                     "환자 식별정보가 포함된 문서의 외부 전송은 원내 개인정보 규정을 먼저 확인하세요.").style("font-size:11px;color:var(--a700)")
+            # 실행 줄 — 판독 실행 · 첨부 비우기 · 판독 설정(필요할 때만 펼침) · 안내(마우스를 올리면 표시)
+            with ui.row().classes("items-center gap-2 w-full").style("border-top:1px solid var(--color-divider);padding-top:10px"):
+                ocr_btn = ui.button("판독 실행", icon="document_scanner").props("no-caps unelevated color=primary")
+                ui.button("첨부 비우기", on_click=clear_docs).props("no-caps flat dense").style("color:var(--color-accent)")
+                ui.element("div").classes("grow")
+                set_sum = ui.label("").classes("text-muted").style("font-size:12px")
+                with ui.button("판독 설정", icon="tune").props("flat dense no-caps").style("color:var(--color-text)"):
+                    with ui.menu().props("anchor='bottom right' self='top right'"):
+                        with ui.column().classes("gap-3").style("padding:14px;min-width:300px"):
+                            ui.label("판독 설정").style("font-family:var(--font-heading);font-weight:600;font-size:16px")
+                            eng = ui.select(ocr.ENGINES, value="gemini", label="판독 엔진").props("dense outlined").classes("w-full")
+                            vkey = ui.input("Vision API 키", password=True).props("dense outlined").classes("w-full")
+                            vkey.bind_visibility_from(eng, "value", backward=lambda v: v == "vision")
+                            lang = ui.select({"ko+en": "한국어 + 영어", "ko": "한국어", "en": "영어"}, value="ko+en", label="인식 언어").props("dense outlined").classes("w-full")
+                            ui.label("기본값(Gemini · 한국어+영어)으로 충분합니다. 영문 위주 문서이거나 Google Vision을 쓸 때만 바꾸세요.").classes("text-muted").style("font-size:11px")
+
+                def refresh_sum(_=None) -> None:
+                    set_sum.set_text(f"{'Gemini' if eng.value == 'gemini' else 'Google Vision'} · {dict(ko_en='한국어+영어', ko='한국어', en='영어')[lang.value.replace('+', '_')]}")
+                eng.on_value_change(refresh_sum)
+                lang.on_value_change(refresh_sum)
+                refresh_sum()
+                ui.button(icon="info_outline").props("flat round dense size=sm").tooltip(
+                    "이미지·PDF는 판독을 실행할 때만 서버를 거쳐 선택한 제공자(Gemini 또는 Google)로 전송됩니다. "
+                    "환자 식별정보가 포함된 문서의 외부 전송은 원내 개인정보 규정을 먼저 확인하세요.")
             render_docs()
 
+        ocr_cancel = {"v": False}
+        # ── 판독 진행 표시 — 판독 실행 중에만 보이는 얇은 한 줄
+        with ui.row().classes("kcm-card w-full items-center gap-3 no-wrap").style("padding:8px 14px;min-height:0") as prog_card:
+            prog_title = ui.label("").style("font-weight:600;font-size:14px;white-space:nowrap")
+            prog_detail = ui.label("").classes("text-muted").style("font-size:12px;flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+            prog_bar = ui.linear_progress(value=0, show_value=False, size="8px").props("rounded stripe animated").style("width:min(220px,26%);flex:none")
+            prog_pct = ui.label("0%").style("font-family:var(--font-heading);font-weight:700;font-size:18px;color:var(--color-accent);min-width:44px;text-align:right")
+            prog_pct.tooltip("진행률은 단계와 파일 크기로 계산한 예상치입니다. 판독 서비스가 중간 진행 정보를 주지 않아 실제 완료 시각과 약간 다를 수 있습니다.")
+            ui.button(icon="stop", on_click=lambda: ocr_cancel.update(v=True)).props("flat round dense size=sm").style("color:var(--warn)").tooltip("판독 중단")
+        prog_card.set_visibility(False)
         # ── ① 의무기록 입력 (아래 작업 영역의 첫 칸으로 옮겨진다)
         with ui.column().classes("kcm-card gap-3 kcm-inputcol") as body_card:
             ui.html('<div class="kcm-tbtn on" style="cursor:default;width:100%"><span class="kcm-step">1</span>의무기록 입력</div>')
@@ -562,29 +617,92 @@ window.kcmSnip=function(){
             await asyncio.gather(analyze(), interpret())
 
         async def run_ocr() -> None:
+            """판독 실행 — 파일별·전체 진행률과 경과 시간을 표시한다.
+            판독 서비스는 중간 진행 정보를 주지 않으므로 진행률은 단계(준비→전송·판독→정리)와 파일 크기에 따른 예상치다."""
             sel = [d for d in st["docs"] if d["sel"]]
             if not sel:
                 ui.notify("판독할 파일을 첨부·선택하세요.", type="warning")
                 return
             ocr_btn.disable()
-            texts = []
-            for d in sel:
-                d["state"] = "판독 중…"
+            st["ocr"] = "busy"
+            render_steps()
+            ocr_cancel["v"] = False
+            for d in st["docs"]:
+                d.pop("pct", None)
+            total, texts, chars = len(sel), [], 0
+            t_all = time.time()
+            prog_card.set_visibility(True)
+            prog_title.set_text(f"판독 중 · 0 / {total}개")
+            prog_pct.set_text("0%")
+            prog_bar.set_value(0)
+            prog_bar.props("color=primary")
+            prog_detail.set_text("준비 중…")
+            for i, d in enumerate(sel):
+                d["state"], d["pct"] = "판독 중", 2
                 render_docs()
+                t0 = time.time()
+                tau = 6 + len(d["data"]) / 1e6 * 5          # 큰 파일일수록 오래 걸린다고 보고 예상 곡선을 늦춘다
+                finished = {"v": False}
+
+                async def ticker(d=d, i=i, t0=t0, tau=tau) -> None:
+                    while not finished["v"]:
+                        el = time.time() - t0
+                        pct = 8 + 84 * (1 - math.exp(-el / tau))        # 8% 전송 준비 → 최대 92% (끝나면 100%)
+                        d["pct"] = int(pct)
+                        overall = (i + pct / 100) / total
+                        prog_bar.set_value(overall)
+                        prog_pct.set_text(f"{int(overall * 100)}%")
+                        if pct >= 88:
+                            prog_detail.set_text(f"{d['name']} — 마무리 중입니다. 판독 서비스 응답이 평소보다 늦어지고 있습니다 · 경과 {int(time.time() - t_all)}초 "
+                                                 "(기다리기 어려우면 ‘중단’을 누르세요)")
+                        else:
+                            prog_detail.set_text(f"{d['name']} — 서버로 보내 글자를 읽는 중 (이 파일 약 {int(pct)}%) · 경과 {int(time.time() - t_all)}초")
+                        render_docs()
+                        await asyncio.sleep(0.6)
+                task = asyncio.create_task(ticker())
                 try:
-                    t = await run.io_bound(ocr.read_document, d["name"], d["data"], d["mime"], eng.value, vkey.value or "", lang.value)
+                    if ocr_cancel["v"]:
+                        raise RuntimeError("사용자가 판독을 중단했습니다.")
+                    fut = asyncio.ensure_future(run.io_bound(ocr.read_document, d["name"], d["data"], d["mime"], eng.value, vkey.value or "", lang.value))
+                    while not fut.done():
+                        if ocr_cancel["v"]:
+                            raise RuntimeError("사용자가 판독을 중단했습니다.")
+                        await asyncio.sleep(0.3)
+                    t = fut.result()
                     d["state"] = f"완료 · {len(t)}자"
                     texts.append(f"[{d['name']}]\n{t}")
+                    chars += len(t)
                 except Exception as ex:  # noqa: BLE001
-                    d["state"] = "실패"
-                    ui.notify(str(ex), type="negative", timeout=8000)
+                    d["state"] = "중단" if ocr_cancel["v"] else "실패"
+                    ui.notify(str(ex), type="warning" if ocr_cancel["v"] else "negative", timeout=8000)
+                finally:
+                    finished["v"] = True
+                    task.cancel()
+                d["pct"] = 100
+                overall = (i + 1) / total
+                prog_bar.set_value(overall)
+                prog_pct.set_text(f"{int(overall * 100)}%")
+                prog_title.set_text(f"판독 중 · {i + 1} / {total}개")
                 render_docs()
             ocr_btn.enable()
+            st["ocr"] = "done" if texts else "error"
+            took = int(time.time() - t_all)
+            for d in st["docs"]:
+                d.pop("pct", None)
+            render_docs()
             if texts:
+                prog_title.set_text(f"✓ 판독 완료 · 파일 {len(texts)}/{total}개 · {chars:,}자 · {took}초")
+                prog_detail.set_text("본문에 추가했습니다. 이어서 의학용어·약어를 해석합니다.")
                 box.set_value(((box.value or "").rstrip() + "\n\n" if (box.value or "").strip() else "") + "\n\n".join(texts))
                 ui.notify("판독 결과를 본문에 추가했습니다. 의학용어·약어를 해석합니다.", type="positive")
                 show_rtab("terms")
                 await interpret()
+                prog_detail.set_text("본문에 추가했고, 의학용어·약어 해석도 끝났습니다.")
+            else:
+                prog_title.set_text(f"판독을 중단했습니다 · {took}초" if ocr_cancel["v"] else f"판독 실패 · 0/{total}개 · {took}초")
+                prog_bar.props("color=negative")
+                prog_detail.set_text("각 파일의 오류 안내를 확인하세요.")
+            ui.timer(12, lambda: prog_card.set_visibility(False), once=True)
 
         ocr_btn.on_click(run_ocr)
 

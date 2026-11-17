@@ -52,8 +52,8 @@ THEME_CSS = """
 --elev-1:0 1px 2px rgba(29,31,32,.05),0 4px 14px rgba(29,31,32,.06);
 --card-line:rgba(29,31,32,.09);
 --warn:#b85c14;--ok:#2f7d4f;--bad:#c9302c;
---font-heading:'Barlow Condensed','Noto Sans KR','Malgun Gothic',system-ui,sans-serif;
---font-body:'Barlow','Noto Sans KR','Malgun Gothic',system-ui,sans-serif;
+--font-heading:'Barlow Condensed','Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif;
+--font-body:'Barlow','Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif;
 --bg:var(--color-bg);--text:var(--color-text);--accent:var(--color-accent);--divider:var(--color-divider);
 --muted:rgba(29,31,32,.55);--accent-hi:var(--a700);--accent-bg:var(--a100);--surface2:var(--surface-2)}
 body.body--dark{
@@ -214,7 +214,7 @@ def apply_theme():
     load_ui_pref()
     ui.add_head_html('<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" '
                      'href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600'
-                     '&family=Noto+Sans+KR:wght@400;500;700&display=swap">')
+                     '&display=swap">')
     app.storage.user.setdefault("dark", False)
     dm = ui.dark_mode().bind_value(app.storage.user, "dark")
     ui.add_body_html("""<script>(function(){var d=null;
@@ -482,10 +482,8 @@ def login_page() -> None:
                     ui.checkbox("아이디 저장").bind_value(state, "save").style("font-size:13px")
 
                 def do_login() -> None:
-                    accounts = store.accounts(fresh=True)
-                    all_orgs = store.orgs(fresh=True)
-                    u, msg = authenticate(state["mode"], state["id"], state["pw"], state["org"],
-                                          accounts, all_orgs, store.sys_admin(fresh=True))
+                    accounts, all_orgs, sysad = store.get_many([("global", "accounts", []), ("global", "orgs", []), ("global", "sysAdmin", None)], fresh=True)
+                    u, msg = authenticate(state["mode"], state["id"], state["pw"], state["org"], accounts or [], all_orgs or [], sysad)
                     if not u:
                         err.set_text(msg)
                         err.style("display:block")
@@ -580,11 +578,11 @@ def kcd_page() -> None:
         return
     layout("kcd")
     from . import kcd_sync
-    m = store.kcd_master(fresh=True)
+    m = store.kcd_master()
     env_key = os.environ.get("DATA_GO_KR_KEY", "").strip()
 
     def stored_key() -> str:
-        v = store.get("global", "dataGoKey", "", fresh=True)
+        v = store.get("global", "dataGoKey", "")
         return (v if isinstance(v, str) else (v or {}).get("key", "")).strip()
 
     with ui.column().classes("w-full gap-4").style("max-width:1000px"):
@@ -598,7 +596,7 @@ def kcd_page() -> None:
             cur_sub = ui.label("").classes("text-muted").style("font-size:12px")
 
             def show_current() -> None:
-                mm = store.kcd_master(fresh=True)
+                mm = store.kcd_master()
                 rows = mm.get("rows", [])
                 en_n = sum(1 for r in rows if len(r) > 2 and r[2])
                 ex_n = sum(1 for r in rows if len(r) > 4 and r[4])
@@ -726,6 +724,24 @@ def _make_placeholder(key: str) -> None:
 
 for _k in PLACEHOLDERS:
     _make_placeholder(_k)
+
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
+
+app.add_middleware(GZipMiddleware, minimum_size=1024)   # 화면 · 스크립트를 압축해서 보낸다 (전송량 1/3~1/5)
+
+
+def _warm() -> None:
+    import threading
+    def go() -> None:
+        store.warm()
+        try:
+            get_index()
+        except Exception:  # noqa: BLE001
+            pass
+    threading.Thread(target=go, daemon=True).start()
+
+
+app.on_startup(_warm)
 
 from . import phase2, phase3, phase4, phase5  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드 / 4단계: 검색·정밀 분석)
 
