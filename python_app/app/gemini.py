@@ -1,0 +1,114 @@
+"""Gemini 호출 — 의무기록 문장에서 KCD 코드 후보를 JSON으로 받는다 (서버에서만 키 사용)."""
+from __future__ import annotations
+
+import json
+import os
+import time
+
+import httpx
+
+from . import store
+
+MODELS = [os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"), "gemini-flash-latest"]
+
+SYSTEM = (
+    "당신은 한국 병원 심사·코딩 전문가입니다. 의무기록 문장을 읽고 KCD(한국표준질병·사인분류) 상병코드 후보를 제안합니다. "
+    "코드는 반드시 KCD 형식(예: I10, E11.9)으로, 가능한 한 세분류까지 정확히 제시하세요. "
+    "확신이 낮으면 confidence를 낮추고, 근거(reason)는 한국어 한 문장으로 쓰세요. 의무기록에 없는 진단을 만들지 마세요."
+)
+
+SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "codes": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "code": {"type": "STRING"},
+                    "name_ko": {"type": "STRING"},
+                    "reason": {"type": "STRING"},
+                    "confidence": {"type": "INTEGER"},
+                    "primary": {"type": "BOOLEAN"},
+                },
+                "required": ["code", "name_ko", "reason", "confidence"],
+            },
+        },
+        "caution": {"type": "STRING"},
+    },
+    "required": ["codes"],
+}
+
+
+def api_key() -> str:
+    k = os.environ.get("GEMINI_API_KEY", "").strip()
+    if k:
+        return k
+    v = store.get("global", "orgGemKey", "")
+    return (v if isinstance(v, str) else (v or {}).get("key", "")).strip()
+
+
+_live: dict = {"at": 0.0, "models": []}
+
+
+def candidate_models(key: str) -> list[str]:
+    """키로 실제 쓸 수 있는 flash 모델을 조회 (지원 종료된 모델 404 방지). 정식 > 미리보기, 최신 버전 우선."""
+    import re
+    if time.time() - _live["at"] > 3600:
+        try:
+            r = httpx.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+                          headers={"x-goog-api-key": key}, timeout=20)
+            names = []
+            if r.is_success:
+                for m in r.json().get("models", []):
+                    n = m["name"].removeprefix("models/")
+                    if ("generateContent" in m.get("supportedGenerationMethods", []) and re.match(r"gemini-\d", n)
+                            and "flash" in n and not re.search(r"image|tts|audio|live|embedding|omni|thinking-exp|preview|latest", n)):
+                        names.append(n)
+
+                def ver(n: str) -> float:
+                    return float(re.match(r"gemini-(\d+(?:\.\d+)?)", n).group(1))
+                names.sort(key=lambda n: (("lite" in n), -ver(n)))
+            _live.update(at=time.time(), models=names)
+        except httpx.HTTPError:
+            pass
+    out = [MODELS[0]] + _live["models"][:4] + MODELS[1:]
+    return list(dict.fromkeys(out))[:6]
+
+
+def suggest(text: str, dept: str = "", purpose: str = "") -> dict:
+    key = api_key()
+    if not key:
+        raise RuntimeError("Gemini API 키가 없습니다. 환경변수 GEMINI_API_KEY를 설정하거나 공용 DB에 기관 키를 등록하세요.")
+    ctx = f"진료과: {dept or '전체'}\n코딩 목적: {purpose or '주진단'}\n\n의무기록:\n{text.strip()}"
+    body = {
+        "systemInstruction": {"parts": [{"text": SYSTEM}]},
+        "contents": [{"role": "user", "parts": [{"text": ctx}]}],
+        "generationConfig": {"temperature": 0.15, "topP": 0.9, "maxOutputTokens": 4096,
+                             "responseMimeType": "application/json", "responseSchema": SCHEMA},
+    }
+    last = 0
+    for model in candidate_models(key):
+        for attempt in range(2):
+            try:
+                r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                               headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+                               json=body, timeout=75)
+            except httpx.TimeoutException:
+                last = 504
+                break
+            last = r.status_code
+            if r.is_success:
+                parts = r.json()["candidates"][0]["content"]["parts"]
+                return json.loads("".join(p.get("text", "") for p in parts))
+            if last in (400, 403):
+                raise RuntimeError("Gemini API 키가 유효하지 않거나 요청이 거부되었습니다.")
+            if last == 404:
+                break
+            if last in (429, 500, 503):
+                time.sleep(1.2 if attempt == 0 else 2.5)
+                continue
+            break
+    if last == 429:
+        raise RuntimeError("Gemini 사용량을 잠시 초과했습니다. 1분 후 다시 시도하세요.")
+    raise RuntimeError(f"Gemini 응답 오류 ({last})")
