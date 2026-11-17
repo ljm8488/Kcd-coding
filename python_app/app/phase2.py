@@ -91,7 +91,7 @@ def index_page() -> None:
                 kids = t.get("kids") or []
                 if kids:
                     nodes = [_node(k, head) for k in kids]
-                    tree = ui.tree(nodes, node_key="id", label_key="label").props("default-expand-all dark").classes("w-full")
+                    tree = ui.tree(nodes, node_key="id", label_key="label").props("default-expand-all").classes("w-full")
                     tree.add_slot("default-header", r'''
                         <div class="row items-center no-wrap" style="gap:8px">
                           <span>{{ props.node.label }}</span>
@@ -121,7 +121,7 @@ def index_page() -> None:
 
 
 # ───────────── AI 자동 코딩 (문서 판독 · 환자 조건 · 청구 목록 · 룰 점검) ─────────────
-SEV_COLOR = {"삭감": "#e57373", "조정": "#e0a458", "확인": "#6a91b7"}
+SEV_COLOR = {"삭감": "var(--bad)", "조정": "var(--warn)", "확인": "#6a91b7"}
 
 
 @ui.page("/nlp")
@@ -277,7 +277,7 @@ def nlp_page() -> None:
                     ui.label("점검할 코드가 없습니다.").classes("text-sm text-muted")
                     return
                 if not findings:
-                    ui.label("✔ 점검 규칙에 걸리는 항목이 없습니다.").style("color:#7bc48a")
+                    ui.label("✔ 점검 규칙에 걸리는 항목이 없습니다.").style("color:var(--ok)")
                 for f in findings:
                     with ui.column().classes("w-full gap-1").style(
                             f"border-left:4px solid {SEV_COLOR[f['sev']]};padding:6px 12px;background:var(--surface2);border-radius:6px"):
@@ -331,9 +331,9 @@ def nlp_page() -> None:
                             ui.label(known or c.get("name_ko", "")).classes("font-semibold")
                             ui.label(c.get("reason", "")).classes("text-sm text-muted")
                             if not known:
-                                ui.label("⚠ 상병마스터에 없는 코드입니다 — 직접 확인하세요.").classes("text-sm").style("color:#e0a458")
+                                ui.label("⚠ 상병마스터에 없는 코드입니다 — 직접 확인하세요.").classes("text-sm").style("color:var(--warn)")
                             for m in warn:
-                                ui.label("⚠ " + m).classes("text-sm").style("color:#e0a458")
+                                ui.label("⚠ " + m).classes("text-sm").style("color:var(--warn)")
                         with ui.column().classes("items-end gap-1"):
                             ui.label(f"{c.get('confidence', 0)}%").classes("font-bold")
                             if c.get("primary"):

@@ -42,8 +42,15 @@ def require_login(roles: tuple[str, ...] | None = None) -> bool:
 
 
 THEME_CSS = """
-:root{--bg:#14181c;--surface:#1a1f24;--surface2:#20262c;--text:#e3e7eb;--muted:#8794a0;
---accent:#6a91b7;--accent-hi:#a9c6e3;--accent-bg:#253546;--divider:rgba(255,255,255,.11)}
+:root{--bg:#f4f7fb;--surface:#ffffff;--surface2:#f1f5f9;--text:#1c2733;--muted:#5b6b7b;
+--accent:#1d5fd1;--accent-hi:#1d5fd1;--accent-bg:#e6efff;--divider:#e2e8f0;
+--warn:#b85c14;--ok:#2f7d4f;--bad:#c9302c;--shadow:rgba(20,40,70,.08)}
+body.body--dark{--bg:#14181c;--surface:#1a1f24;--surface2:#20262c;--text:#e3e7eb;--muted:#8794a0;
+--accent:#6a91b7;--accent-hi:#a9c6e3;--accent-bg:#253546;--divider:rgba(255,255,255,.11);
+--warn:#e0a458;--ok:#7bc48a;--bad:#e57373;--shadow:rgba(0,0,0,.3)}
+body{--q-primary:var(--accent)}
+.q-tree__node-header-content{color:var(--text)}
+.q-field--outlined .q-field__control:before{border-color:var(--divider)}
 body,.q-page,.nicegui-content{background:var(--bg)!important;color:var(--text)!important;
  font-family:'Pretendard','Malgun Gothic',system-ui,sans-serif}
 .nicegui-content{padding:0!important}
@@ -51,7 +58,7 @@ body,.q-page,.nicegui-content{background:var(--bg)!important;color:var(--text)!i
 .kcm-logo{width:30px;height:30px;border-radius:8px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700}
 .kcm-side{width:236px;flex:none;position:sticky;top:76px;align-self:flex-start;margin:24px 0 24px 20px;
  background:var(--surface);border:1px solid var(--divider);border-radius:12px;padding:10px;
- box-shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25)}
+ box-shadow:0 1px 2px var(--shadow),0 4px 14px var(--shadow)}
 .kcm-nav{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:var(--text);
  text-decoration:none;font-size:14px}
 .kcm-nav:hover{background:var(--surface2)}
@@ -78,15 +85,65 @@ NAV_ROLES = {"dash": ("sysadmin", "orgadmin"), "users": ("sysadmin", "orgadmin")
 TITLES = {k: t for k, t, _, _ in NAV}
 
 
-def apply_theme() -> None:
-    ui.dark_mode(True)
+def apply_theme():
+    """라이트/다크 — 사용자의 선택을 브라우저별로 기억한다 (기본: 라이트)."""
+    app.storage.user.setdefault("dark", False)
+    dm = ui.dark_mode().bind_value(app.storage.user, "dark")
     ui.add_css(THEME_CSS)
+    app.storage.user.setdefault("zoom", 100)
+    ui.add_css(f"body{{zoom:{int(app.storage.user['zoom'])}%}}")
+    return dm
+
+
+def account_menu(dm, u: dict) -> None:
+    """상단 계정 버튼 → 화면 모드(라이트/다크) · 화면 크기(가-/100%/가+) · 로그아웃"""
+    def set_zoom(z: int) -> None:
+        z = max(70, min(150, z))
+        app.storage.user["zoom"] = z
+        zl.set_text(f"{z}%")
+        ui.run_javascript(f"document.body.style.zoom='{z}%'")
+
+    orgs = {o["id"]: o["name"] for o in store.orgs()}
+    with ui.button().props("flat no-caps dense").style("color:var(--text)"):
+        ui.label(f"{u['name']} · {ROLE_LABEL.get(u['role'], u['role'])}").classes("text-sm")
+        ui.icon("expand_more")
+        with ui.menu().props("anchor='bottom right' self='top right'"):
+            with ui.column().classes("kcm-card gap-3").style("width:330px;box-shadow:none"):
+                with ui.row().classes("gap-2"):
+                    ui.badge(ROLE_LABEL.get(u["role"], u["role"])).props("outline")
+                    if orgs.get(u.get("orgId")):
+                        ui.badge(orgs[u["orgId"]]).props("outline")
+                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                    ui.label("데이터 · PC 화면").classes("text-sm text-muted")
+                    ui.label(f"● 실시간 · {dt.datetime.now().strftime('%H:%M')}").classes("text-xs").style("color:var(--ok)")
+                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                    ui.label("화면 모드").classes("text-sm text-muted")
+                    ui.toggle({False: "라이트", True: "다크"}).props("no-caps dense unelevated") \
+                        .bind_value(app.storage.user, "dark")
+                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                    ui.label("화면 크기").classes("text-sm text-muted")
+                    with ui.row().classes("items-center gap-1 no-wrap"):
+                        ui.button("가-", on_click=lambda: set_zoom(int(app.storage.user["zoom"]) - 10)).props("outline dense no-caps")
+                        zl = ui.label(f"{int(app.storage.user['zoom'])}%").classes("text-sm font-bold").style("min-width:48px;text-align:center")
+                        ui.button("가+", on_click=lambda: set_zoom(int(app.storage.user["zoom"]) + 10)).props("outline dense no-caps")
+                        ui.button("100%", on_click=lambda: set_zoom(100)).props("flat dense no-caps")
+                ui.separator()
+                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                    ui.label(u.get("id", "")).classes("text-xs text-muted")
+                    ui.button("로그아웃", on_click=logout).props("flat dense no-caps").style("color:var(--accent-hi)")
+
+
+def theme_toggle(dm) -> None:
+    btn = ui.button(on_click=lambda: dm.set_value(not dm.value)).props("flat round dense").style("color:var(--text)")
+    with btn:
+        ui.icon("dark_mode").bind_name_from(app.storage.user, "dark", backward=lambda d: "light_mode" if d else "dark_mode")
+        ui.tooltip("라이트 / 다크 모드 전환")
 
 
 def layout(active: str) -> None:
     """원본과 같은 구성 — 상단 헤더(로고·위치) + 왼쪽 메뉴 카드 + 본문. 이후 요소는 본문에 들어간다."""
     u = user()
-    apply_theme()
+    dm = apply_theme()
     with ui.row().classes("kcm-header w-full items-center justify-between no-wrap").style("position:sticky;top:0;z-index:30"):
         with ui.row().classes("items-center gap-3 no-wrap"):
             ui.label("심").classes("kcm-logo")
@@ -94,8 +151,7 @@ def layout(active: str) -> None:
             ui.label("/").classes("text-muted")
             ui.label(TITLES.get(active, "")).classes("text-sm")
         with ui.row().classes("items-center gap-3 no-wrap"):
-            ui.label(f"{u['name']} · {ROLE_LABEL.get(u['role'], u['role'])}").classes("text-sm text-muted")
-            ui.button("로그아웃", on_click=logout).props("flat dense no-caps").style("color:var(--accent-hi)")
+            account_menu(dm, u)
     row = ui.row().classes("w-full no-wrap items-start gap-0")
     with row:
         with ui.element("aside").classes("kcm-side"):
@@ -134,7 +190,9 @@ def login_page() -> None:
     org_opts = {o["id"]: o["name"] for o in orgs}
     state = {"mode": "emp", "org": next(iter(org_opts), ""), "id": "", "pw": ""}
 
-    apply_theme()
+    dm = apply_theme()
+    with ui.row().classes("absolute-top-right p-3"):
+        theme_toggle(dm)
     with ui.column().classes("kcm-card absolute-center w-96 gap-3"):
         ui.label("심사 코딩마스터").classes("text-2xl font-bold")
         ui.label("소속기관을 선택하고 사번 또는 Gmail로 로그인하십시오.").classes("text-sm text-muted")

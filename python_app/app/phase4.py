@@ -100,7 +100,7 @@ def search_page() -> None:
             s, a = sex.value or "", parse_age(age.value)
             msgs = [m for m in (rules.sex_issue(code, s), rules.age_issue(code, a)) if m]
             if msgs:
-                return "⚠ " + msgs[0], "#e0a458"
+                return "⚠ " + msgs[0], "var(--warn)"
             return "", ""
 
         def to_favs(code: str) -> None:
@@ -142,7 +142,7 @@ def search_page() -> None:
                       <q-btn flat dense size="sm" icon="history" @click="() => $parent.$emit('hist', props.row)"><q-tooltip>이력에 기록</q-tooltip></q-btn>
                     </q-td>''')
                 t.add_slot("body-cell-flag", r'''
-                    <q-td :props="props"><span :style="props.row.flag.startsWith('⚠') ? 'color:#e0a458' : 'color:#8794a0'">{{ props.row.flag }}</span></q-td>''')
+                    <q-td :props="props"><span :style="props.row.flag.startsWith('⚠') ? 'color:var(--warn)' : 'color:var(--muted)'">{{ props.row.flag }}</span></q-td>''')
                 t.on("detail", lambda e: go_detail(e.args["code"]))
                 t.on("fav", lambda e: to_favs(e.args["code"]))
                 t.on("hist", lambda e: to_hist(e.args["code"]))
@@ -250,9 +250,9 @@ def search_page() -> None:
                                 ui.label(f"{c.get('confidence', 0)}%").classes("text-xs font-bold")
                             ui.label(known or c.get("name_ko", "")).classes("text-sm")
                             ui.label("✔ 색인 확인" if known else "⚠ 색인 미수록 — 표제부 확인").classes("text-xs").style(
-                                "color:#7bc48a" if known else "color:#e0a458")
+                                "color:var(--ok)" if known else "color:var(--warn)")
                             if v:
-                                ui.label(v).classes("text-xs").style("color:#e0a458")
+                                ui.label(v).classes("text-xs").style("color:var(--warn)")
                             if c.get("reason"):
                                 ui.tooltip(c["reason"])
                 ui.label("코드를 누르면 색인을 다시 검색합니다.").classes("text-xs text-muted")
@@ -334,12 +334,12 @@ def detail_page(code: str = "") -> None:
                 if row.syn:
                     ui.label("동의어: " + ", ".join(row.syn)).classes("text-sm text-muted")
             else:
-                ui.label("상병마스터에 없는 코드입니다 — 상위 계열만 표시합니다.").style("color:#e0a458")
+                ui.label("상병마스터에 없는 코드입니다 — 상위 계열만 표시합니다.").style("color:var(--warn)")
             kids = fam.children(code)
             if fam.has_child(code):
-                ui.label("⚠ 하위 세분류가 있습니다. 최말단 코드까지 지정해야 청구할 수 있습니다.").classes("text-sm").style("color:#e0a458")
+                ui.label("⚠ 하위 세분류가 있습니다. 최말단 코드까지 지정해야 청구할 수 있습니다.").classes("text-sm").style("color:var(--warn)")
             elif row:
-                ui.label("✔ 최말단 코드 — 청구 가능").classes("text-sm").style("color:#7bc48a")
+                ui.label("✔ 최말단 코드 — 청구 가능").classes("text-sm").style("color:var(--ok)")
 
             def to_favs() -> None:
                 from .phase3 import add_fav
