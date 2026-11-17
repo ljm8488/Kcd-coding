@@ -64,19 +64,33 @@ def search_page() -> None:
     names = {r.code.upper(): r.ko for r in idx.rows}
     st = {"q": "", "sex": "", "age": None, "hits": [], "ai": None}
 
-    with ui.column().classes("w-full max-w-6xl gap-3"):
-        ui.label("검색 · 코드 생성").classes("text-xl font-bold")
-        ui.label(f"KCD 상병 {len(idx):,}건 · 코드(예: I10, E11.9), 한글명, 동의어, 부위+질환(예: 손가락 골절)으로 검색합니다.").classes("text-sm text-muted")
-        with ui.row().classes("w-full no-wrap gap-2 items-center"):
-            box = ui.input(placeholder="질병명 또는 코드를 입력하세요").props("outlined clearable autofocus").classes("grow")
-            ui.button("검색", icon="search", on_click=lambda: do_search()).props("no-caps")
-        with ui.row().classes("items-center gap-3"):
-            ui.label("환자 조건 검증").classes("text-sm text-muted")
-            sex = ui.select({"": "성별 전체", "M": "남", "F": "여"}, value="").props("dense outlined").classes("w-32")
-            age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("w-32")
-            ui.label("입력하면 성별·연령에 맞지 않는 코드를 표시합니다.").classes("text-xs text-muted")
-        info = ui.label("").classes("text-sm text-muted")
+    ui.add_css(".kcm-search .q-field__control{height:58px}.kcm-search input{font-size:17px}")
+    st["view"] = "card"
+    st["auto"] = True
+    with ui.column().classes("w-full max-w-5xl gap-3"):
+        with ui.column().classes("kcm-card w-full gap-3"):
+            ui.label("질병명 · 진단명 · 의학용어 · 약어 · 코드").style("font-size:12px;color:var(--muted)")
+            box = ui.input(placeholder="예: 위암 / gastric cancer / HTN / appendicitis / J18").props("outlined clearable autofocus") \
+                .classes("kcm-search w-full")
+            with ui.row().classes("w-full no-wrap gap-2 items-stretch"):
+                ui.button("코드 생성", on_click=lambda: do_search()).props("no-caps unelevated color=primary").classes("grow").style("min-height:40px;font-size:15px")
+                ui.button("AI", icon="auto_awesome", on_click=lambda: run_ai()).props("no-caps outline")
+                auto_btn = ui.button("자동 ON", icon="bolt").props("no-caps outline")
 
+                def toggle_auto() -> None:
+                    st["auto"] = not st["auto"]
+                    auto_btn.set_text("자동 ON" if st["auto"] else "자동 OFF")
+                auto_btn.on_click(toggle_auto)
+                ui.button("초기화", on_click=lambda: (box.set_value(""), do_search())).props("no-caps outline")
+            with ui.row().classes("gap-2"):
+                for chip in ["위암", "고혈압", "폐렴", "Appendicitis", "관절염", "두통", "J18", "HTN"]:
+                    ui.button(chip, on_click=lambda _, c=chip: set_query(c)).props("outline dense no-caps size=sm").style("padding:0 10px")
+            with ui.row().classes("items-center gap-3"):
+                ui.label("환자 조건 검증").classes("text-muted").style("font-size:12px")
+                sex = ui.select({"": "성별 전체", "M": "남", "F": "여"}, value="").props("dense outlined").classes("w-32")
+                age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("w-32")
+                ui.label(f"입력하면 성별·연령에 맞지 않는 코드를 표시합니다 · KCD 상병 {len(idx):,}건").classes("text-muted").style("font-size:11px")
+        info = ui.label("").classes("text-muted").style("font-size:12px")
         with ui.tabs().classes("w-full").props("dense align=left") as tabs:
             t_res = ui.tab("res", label="결과 · 코드")
             t_ai = ui.tab("ai", label="✦ AI 의미 검색")
@@ -112,15 +126,68 @@ def search_page() -> None:
             add_history(st["q"], code, names.get(code, ""))
             ui.notify("이력에 기록했습니다.", type="positive")
 
+        def unit_label(code: str) -> str:
+            n = len(code.replace(".", ""))
+            tail = "하위 세분류 있음" if fam.has_child(code) else "최말단 · 청구 가능"
+            return f"{n}단위 · {tail}"
+
         def render_results() -> None:
             res_box.clear()
             hits = st["hits"]
             with res_box:
                 if not st["q"].strip():
-                    ui.label("검색어를 입력하세요.").classes("text-muted text-sm")
+                    ui.label("검색어를 입력하고 ‘코드 생성’을 누르세요.").classes("text-muted text-sm")
                     return
                 if not hits:
-                    ui.label("결과가 없습니다. 'AI 의미 검색' 탭에서 구어·약어도 해석해 볼 수 있습니다.").classes("text-muted text-sm")
+                    ui.label("결과가 없습니다. ‘AI 의미 검색’ 탭에서 구어·약어도 해석해 볼 수 있습니다.").classes("text-muted text-sm")
+                    return
+                groups: dict[str, list] = {}
+                for r in hits:
+                    groups.setdefault(r.code[:3], []).append(r)
+                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                    ui.label(f"결과는 · 코드 {len(hits)}개 · 계열 {len(groups)}개").classes("text-muted").style("font-size:12px")
+                    with ui.element("div").classes("kcm-seg"):
+                        b1 = ui.element("button").classes("on" if st["view"] == "card" else "").on("click", lambda: set_view("card"))
+                        with b1:
+                            ui.label("카드형")
+                        b2 = ui.element("button").classes("on" if st["view"] == "list" else "").on("click", lambda: set_view("list"))
+                        with b2:
+                            ui.label("목록형")
+                if st["view"] == "card":
+                    for root, rows_ in list(groups.items())[:30]:
+                        head = next((r for r in rows_ if r.code == root), rows_[0])
+                        with ui.column().classes("kcm-card w-full gap-2"):
+                            ui.label((head.en or f"{root} 계열").upper()).classes("kicker")
+                            ui.label(head.ko).style("font-family:var(--font-heading);font-weight:600;font-size:24px;line-height:1.15")
+                            ui.label(f"{root} 계열 · 코드 {len(rows_)}개").classes("text-muted").style("font-size:13px")
+                            with ui.element("div").classes("w-full").style(
+                                    "display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px"):
+                                for i, r in enumerate(rows_[:6]):
+                                    v, _ = verdict(r.code)
+                                    with ui.column().classes("gap-1").style(
+                                            "border:1px solid var(--color-divider);border-radius:10px;padding:10px 12px;background:var(--surface-2)"
+                                            + (";border-color:var(--color-accent)" if i == 0 else "")):
+                                        with ui.row().classes("w-full items-center justify-between no-wrap"):
+                                            ui.label(r.code).classes("mono").style("font-weight:700;font-size:15px;color:var(--accent-hi)")
+                                            if i == 0:
+                                                ui.html('<span class="kcm-tag">추천</span>')
+                                        ui.label(r.ko).style("font-size:14px;line-height:1.35")
+                                        ui.label(unit_label(r.code)).classes("text-muted").style("font-size:11px")
+                                        lim = rules.restriction(r.code)
+                                        if lim:
+                                            ui.label("제한: " + lim).style("font-size:11px;color:var(--warn)")
+                                        if v:
+                                            ui.label(v).style("font-size:11px;color:var(--warn)")
+                                        with ui.row().classes("w-full justify-end gap-1"):
+                                            ui.button("정밀 분석", on_click=lambda _, c=r.code: go_detail(c)).props("outline dense no-caps size=sm")
+                            if len(rows_) > 6:
+                                ui.label(f"… 외 {len(rows_) - 6}개 — 목록형에서 모두 볼 수 있습니다.").classes("text-muted").style("font-size:12px")
+                            with ui.row().classes("w-full justify-end gap-2"):
+                                ui.button("즐겨찾기", icon="star_outline", on_click=lambda _, c=head.code: to_favs(c)).props("outline dense no-caps size=sm")
+                                ui.button("이력에 기록", icon="history", on_click=lambda _, c=head.code: to_hist(c)).props("outline dense no-caps size=sm")
+                                ui.button("정밀 분석", on_click=lambda _, c=head.code: go_detail(c)).props("unelevated dense no-caps size=sm color=primary")
+                    if len(groups) > 30:
+                        ui.label(f"계열 {len(groups) - 30}개 더 있음 — 검색어를 좁혀 보세요.").classes("text-muted text-sm")
                     return
                 rows = []
                 for r in hits:
@@ -147,6 +214,9 @@ def search_page() -> None:
                 t.on("fav", lambda e: to_favs(e.args["code"]))
                 t.on("hist", lambda e: to_hist(e.args["code"]))
 
+        def set_view(v: str) -> None:
+            st["view"] = v
+            render_results()
         def render_similar() -> None:
             sim_box.clear()
             q = norm(st["q"])
@@ -298,6 +368,7 @@ def search_page() -> None:
             render_ai()
 
         box.on("keydown.enter", do_search)
+        box.on("update:model-value", lambda: do_search() if st["auto"] else None, throttle=0.5)
         sex.on_value_change(lambda _: revalidate())
         age.on("update:model-value", revalidate, throttle=0.4)
         render_results()

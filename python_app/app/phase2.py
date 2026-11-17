@@ -31,19 +31,39 @@ def cond_page() -> None:
 
     def save() -> None:
         store.put(f"user:{u['id']}", "cond", cond, by=u["id"])
-        ui.notify("저장했습니다.", type="positive")
+        ui.notify("조건을 저장했습니다.", type="positive", timeout=1200)
 
-    with ui.column().classes("w-full max-w-3xl gap-3"):
-        ui.label("조건 설정").classes("text-xl font-bold")
-        ui.label("검색 · 코드 생성, AI 자동 코딩에 적용할 진료과, 코딩 목적, KCD 버전, 정확도를 정합니다.").classes("text-sm text-muted")
+    def setv(key: str):
+        def _f(e) -> None:
+            cond[key] = e.value
+            save()
+        return _f
+
+    srcs = cond.get("sources") or ["내부 사전", "AI 해석"]
+
+    def toggle_src(name: str, on: bool) -> None:
+        cur = set(cond.get("sources") or ["내부 사전", "AI 해석"])
+        (cur.add if on else cur.discard)(name)
+        cond["sources"] = sorted(cur)
+        save()
+
+    with ui.column().classes("w-full max-w-3xl gap-4"):
+        ui.label("조건 설정").classes("kcm-h1")
+        ui.label("검색 · 코드 생성에 적용할 진료과, 코딩 목적, KCD 버전, 정확도, 데이터 소스를 정합니다.").classes("text-muted").style("font-size:13px;margin-top:-8px")
         with ui.column().classes("kcm-card w-full gap-3"):
-            ui.select(DEPTS, label="진료과", value=cond["dept"], on_change=lambda e: cond.update(dept=e.value)).classes("w-full")
-            ui.select(PURPOSES, label="코딩 목적", value=cond["purpose"], on_change=lambda e: cond.update(purpose=e.value)).classes("w-full")
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label("조건 설정").style("font-family:var(--font-heading);font-weight:600;font-size:13px;letter-spacing:.08em")
+                ui.label("바꾼 조건은 자동 저장되며 검색 · 코드 생성에 바로 적용됩니다.").classes("text-muted").style("font-size:11px")
+            ui.select(DEPTS, label="진료과", value=cond["dept"], on_change=setv("dept")).props("dense outlined").classes("w-full")
+            ui.select(PURPOSES, label="코딩 목적", value=cond["purpose"], on_change=setv("purpose")).props("dense outlined").classes("w-full")
             with ui.row().classes("w-full no-wrap gap-3"):
-                ui.select(VERS, label="KCD", value=cond["ver"], on_change=lambda e: cond.update(ver=e.value)).classes("w-1/2")
-                ui.select(ACCS, label="정확도", value=cond["minAcc"], on_change=lambda e: cond.update(minAcc=e.value)).classes("w-1/2")
-            ui.button("저장", on_click=save).props("no-caps")
-
+                ui.select(VERS, label="KCD", value=cond["ver"], on_change=setv("ver")).props("dense outlined").classes("w-1/2")
+                ui.select(ACCS, label="정확도", value=cond["minAcc"], on_change=setv("minAcc")).props("dense outlined").classes("w-1/2")
+            ui.label("데이터 소스").classes("text-muted").style("font-size:12px")
+            with ui.row().classes("gap-4"):
+                for name in ["내부 사전", "AI 해석", "공공 API"]:
+                    ui.checkbox(name, value=name in srcs, on_change=lambda e, n=name: toggle_src(n, e.value))
+        ui.button("검색 · 코드 생성으로 이동", on_click=lambda: ui.navigate.to("/search")).props("no-caps unelevated color=primary").classes("self-start")
 
 # ───────────── 3권 색인 검색 ─────────────
 def _node(n: dict, path: str) -> dict:
@@ -68,49 +88,64 @@ def index_page() -> None:
     trees = [t for t in trees if isinstance(t, dict) and not t.get("retired")]
     idx = get_index()
     names = {r.code: r.ko for r in idx.rows}
+    cur = {"t": None}
 
-    with ui.column().classes("w-full max-w-6xl gap-3"):
-        ui.label("3권 색인 검색").classes("text-xl font-bold")
-        ui.label(f"색인 주용어 {len(trees)}개 — 주용어를 고르면 수식어 단계별로 KCD 코드를 따라갈 수 있습니다.").classes("text-sm text-muted")
-        with ui.row().classes("w-full no-wrap gap-4 items-start"):
-            with ui.column().classes("kcm-card gap-2").style("width:300px;flex:none"):
-                q = ui.input(placeholder="주용어·동의어·코드 검색").props("outlined dense clearable").classes("w-full")
-                lst = ui.column().classes("w-full gap-0").style("max-height:60vh;overflow:auto")
-            detail = ui.column().classes("kcm-card gap-2 grow").style("min-width:0")
+    with ui.column().classes("w-full max-w-5xl gap-4"):
+        ui.label("KCD 제3권 색인 검색").classes("kcm-h1")
+        ui.label("선도어를 고르고 수식어(하위어)를 따라가면 최종 분류코드에 도달합니다. 1권 분류표의 분류명이 단계마다 표시됩니다.") \
+            .classes("text-muted").style("font-size:13px;margin-top:-8px")
+        with ui.column().classes("kcm-card w-full gap-2"):
+            ui.label("선도어 (MAIN TERM)").classes("kicker")
+            with ui.row().classes("items-center gap-3 w-full no-wrap"):
+                q = ui.input(placeholder="선도어 찾기 — 예: 골절, 폐렴, 당뇨").props("outlined dense clearable").classes("w-72")
+                cnt = ui.label("").classes("text-muted").style("font-size:12px")
+            chips = ui.row().classes("w-full gap-2").style("max-height:190px;overflow:auto")
+        detail = ui.column().classes("kcm-card w-full gap-2")
+
+        def walk(nodes: list, depth: int) -> None:
+            for n in nodes:
+                if not isinstance(n, dict):
+                    continue
+                label = n.get("mod") or n.get("label") or n.get("term") or ""
+                code = n.get("code") or ""
+                kids = n.get("kids") or []
+                with ui.row().classes("w-full items-center justify-between no-wrap").style(
+                        f"padding:7px 8px 7px {8 + depth * 20}px;border-bottom:1px solid var(--color-divider)"):
+                    ui.label("– " + label).style("font-size:14px;" + ("" if not kids else "font-weight:600"))
+                    if code:
+                        with ui.row().classes("items-center gap-3 no-wrap"):
+                            ui.label(code).classes("mono").style("font-weight:700;color:var(--accent-hi)").on(
+                                "click", lambda _, c=code: ui.navigate.to(f"/detail?code={c}")).classes("cursor-pointer")
+                            ui.label("하위 있음" if kids else "최종").classes("text-muted").style("font-size:11px;width:52px;text-align:right")
+                if isinstance(kids, list) and kids:
+                    walk(kids, depth + 1)
 
         def show(t: dict) -> None:
+            cur["t"] = t
             detail.clear()
             with detail:
-                head = t.get("term", "")
                 code = t.get("code", "")
-                ui.label(head).classes("text-lg font-bold")
+                with ui.row().classes("w-full items-baseline justify-between no-wrap"):
+                    ui.label(f"{t.get('term', '')} (선도어) {code}").classes("kicker")
+                ui.label(names.get(code, t.get("term", ""))).style("font-family:var(--font-heading);font-weight:600;font-size:24px")
                 if t.get("syn"):
-                    ui.label("동의어: " + ", ".join(t["syn"])).classes("text-sm text-muted")
-                if code:
-                    ui.label(f"대표 코드 {code} · {names.get(code, '')}").style("color:var(--accent-hi)")
+                    ui.label("동의어: " + ", ".join(t["syn"])).classes("text-muted").style("font-size:12px")
                 kids = t.get("kids") or []
                 if kids:
-                    nodes = [_node(k, head) for k in kids]
-                    tree = ui.tree(nodes, node_key="id", label_key="label").props("default-expand-all").classes("w-full")
-                    tree.add_slot("default-header", r'''
-                        <div class="row items-center no-wrap" style="gap:8px">
-                          <span>{{ props.node.label }}</span>
-                          <q-badge v-if="props.node.code" color="blue-grey-8" :label="props.node.code" />
-                        </div>''')
+                    walk(kids, 0)
                 else:
                     ui.label("세부 수식어가 없습니다.").classes("text-muted")
+            refresh()
 
         def refresh() -> None:
             s = norm(q.value or "")
-            lst.clear()
-            hits = []
-            for t in trees:
-                keys = [norm(t.get("term", "")), norm(t.get("code", ""))] + [norm(x) for x in (t.get("syn") or [])]
-                if not s or any(s in k for k in keys):
-                    hits.append(t)
-            with lst:
+            chips.clear()
+            hits = [t for t in trees if not s or any(s in k for k in [norm(t.get("term", "")), norm(t.get("code", ""))] + [norm(x) for x in (t.get("syn") or [])])]
+            cnt.set_text(f"선도어 {len(hits)}개")
+            with chips:
                 for t in hits[:300]:
-                    ui.button(t.get("term", ""), on_click=lambda _, t=t: show(t)).props("flat no-caps align=left dense").classes("w-full")
+                    on = cur["t"] is t
+                    ui.button(t.get("term", ""), on_click=lambda _, t=t: show(t)).props("dense no-caps size=sm " + ("unelevated color=primary" if on else "outline")).style("padding:0 12px")
                 if not hits:
                     ui.label("결과 없음").classes("text-muted text-sm")
 
@@ -118,7 +153,6 @@ def index_page() -> None:
         refresh()
         if trees:
             show(trees[0])
-
 
 # ───────────── AI 자동 코딩 (문서 판독 · 환자 조건 · 청구 목록 · 룰 점검) ─────────────
 SEV_COLOR = {"삭감": "var(--bad)", "조정": "var(--warn)", "확인": "#6a91b7"}
@@ -138,34 +172,45 @@ def nlp_page() -> None:
     cond = load_cond()
     st = {"claim": [], "docs": []}   # claim: [{code, kind}], docs: [{name, mime, data, sel}]
 
-    with ui.column().classes("w-full max-w-6xl gap-3"):
-        ui.label("AI 자동 코딩 · 임상 텍스트 분석").classes("text-xl font-bold")
-        ui.label(f"의무기록 문장을 붙여 넣거나 문서를 첨부해 판독하면 Gemini가 KCD 후보를 제안하고, 상병마스터({len(idx):,}건)로 검증합니다. "
-                 f"적용 조건: {cond['dept']} · {cond['purpose']}").classes("text-sm text-muted")
-
-        # ── 환자 조건
-        with ui.row().classes("kcm-card w-full items-center gap-4"):
-            ui.label("환자").classes("font-semibold")
-            sex = ui.select({"": "성별 미입력", "M": "남", "F": "여"}, value="", label="성별").props("dense outlined").classes("w-36")
-            age = ui.input("연령(세)").props("dense outlined type=number min=0 max=120").classes("w-32")
-            ui.label("성별·연령을 넣으면 룰 점검에서 불일치 코드를 찾아 줍니다.").classes("text-xs text-muted")
+    with ui.column().classes("w-full max-w-6xl gap-4"):
+        ui.label("AI 자동 코딩 · 임상 텍스트 분석").classes("kcm-h1")
+        ui.label("의무기록 서식을 붙여 넣거나 문서를 첨부해 판독하면 진단 문구를 추출하고, 상병마스터"
+                 f"({len(idx):,}건)로 검증해 주진단 · 부진단을 제안합니다. 적용 조건: {cond['dept']} · {cond['purpose']}") \
+            .classes("text-muted").style("font-size:13px;margin-top:-8px")
 
         # ── 문서 첨부 · 판독
-        with ui.column().classes("kcm-card w-full gap-2"):
-            ui.label("문서 첨부 — 소견서 · 진단서 · 진료의뢰서").classes("font-semibold")
-            ui.label("PDF · JPG · PNG · TXT (최대 10MB). 판독할 파일만 체크하세요.").classes("text-xs text-muted")
-            docs_box = ui.column().classes("w-full gap-1")
+        with ui.column().classes("kcm-card w-full gap-3"):
+            ui.label("문서 첨부 — 소견서 · 진단서 · 진료의뢰서").style("font-family:var(--font-heading);font-weight:600;font-size:13px;letter-spacing:.08em")
+            with ui.row().classes("items-center w-full no-wrap gap-2").style("font-size:12px"):
+                for i, lab in enumerate(["문서 첨부", "판독 파일 선택", "판독 실행"], 1):
+                    with ui.row().classes("items-center gap-1 no-wrap"):
+                        ui.label(str(i)).style("width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:700;"
+                                               "font-size:12px;border:1px solid var(--color-accent);color:var(--color-accent)")
+                        ui.label(lab)
+                    if i < 3:
+                        ui.element("span").style("flex:1 1 24px;min-width:16px;height:1px;background:var(--color-divider)")
+            with ui.row().classes("w-full gap-3 items-stretch").style("flex-wrap:wrap"):
+                with ui.column().style("flex:0 1 300px;min-width:250px;border:1px dashed var(--color-accent);border-radius:10px;padding:12px;justify-content:center"):
+                    up = ui.upload(on_upload=lambda e: on_upload(e), multiple=True, auto_upload=True, label="파일 선택 (여러 개 가능)") \
+                        .props("accept=.pdf,.jpg,.jpeg,.png,.txt flat bordered").classes("w-full")
+                    ui.label("PDF · JPG · PNG · TXT — 최대 10MB, 여러 개 동시 첨부").classes("text-muted").style("font-size:11px;text-align:center")
+                docs_box = ui.column().classes("gap-1").style(
+                    "flex:1 1 360px;min-width:0;border:1px solid var(--color-divider);border-radius:10px;padding:12px;min-height:150px;max-height:300px;overflow:auto")
 
             def render_docs() -> None:
                 docs_box.clear()
                 with docs_box:
                     if not st["docs"]:
-                        ui.label("첨부한 파일이 여기에 표시됩니다.").classes("text-sm text-muted")
+                        ui.label("첨부 파일 목록").style("font-size:13px;text-align:center;width:100%;margin-top:40px")
+                        ui.label("첨부한 파일이 여기에 표시됩니다. 판독할 파일만 체크하세요.").classes("text-muted").style("font-size:12px;text-align:center;width:100%")
+                        return
+                    ui.label(f"첨부 {len(st['docs'])}개 · 선택 {sum(1 for d in st['docs'] if d['sel'])}개").classes("text-muted").style("font-size:12px")
                     for d in st["docs"]:
-                        with ui.row().classes("items-center no-wrap gap-2 w-full"):
+                        with ui.row().classes("items-center no-wrap gap-2 w-full").style("border:1px solid var(--color-divider);border-radius:8px;padding:4px 8px"):
                             ui.checkbox(value=d["sel"], on_change=lambda e, d=d: d.update(sel=e.value))
-                            ui.label(d["name"]).classes("text-sm grow")
-                            ui.label(f"{len(d['data']) / 1024:,.0f} KB · {d['state']}").classes("text-xs text-muted")
+                            with ui.column().classes("gap-0 grow").style("min-width:0"):
+                                ui.label(d["name"]).style("font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+                                ui.label(f"{len(d['data']) / 1024:,.0f} KB · {d['state']}").classes("text-muted mono").style("font-size:11px")
                             ui.button(icon="close", on_click=lambda _, d=d: (st["docs"].remove(d), render_docs())).props("flat round dense size=sm")
 
             async def on_upload(e) -> None:
@@ -176,30 +221,35 @@ def nlp_page() -> None:
                 st["docs"].append({"name": name, "mime": mime, "data": raw, "sel": True, "state": "대기"})
                 render_docs()
 
-            up = ui.upload(on_upload=on_upload, multiple=True, auto_upload=True, label="파일 선택 (여러 개 가능)") \
-                .props("accept=.pdf,.jpg,.jpeg,.png,.txt flat bordered").classes("w-full")
-            up.on("removed", lambda: None)
-            with ui.row().classes("items-end gap-3"):
+            with ui.row().classes("items-end gap-3 w-full").style("border-top:1px solid var(--color-divider);padding-top:12px"):
                 eng = ui.select(ocr.ENGINES, value="gemini", label="판독 엔진").props("dense outlined").classes("w-72")
                 vkey = ui.input("Vision API 키", password=True).props("dense outlined").classes("w-64")
                 vkey.bind_visibility_from(eng, "value", backward=lambda v: v == "vision")
                 lang = ui.select({"ko+en": "한국어 + 영어", "ko": "한국어", "en": "영어"}, value="ko+en", label="인식 언어").props("dense outlined").classes("w-40")
-                ocr_btn = ui.button("판독(OCR) 실행", icon="document_scanner").props("no-caps")
+                ocr_btn = ui.button("판독 실행").props("no-caps unelevated color=primary")
 
                 def clear_docs() -> None:
                     st["docs"].clear()
                     up.reset()
                     render_docs()
-                ui.button("첨부 비우기", on_click=clear_docs).props("no-caps flat")
-            ui.label("이미지·PDF는 판독을 실행할 때만 서버를 거쳐 선택한 제공자(Gemini 또는 Google)로 전송됩니다. "
-                     "환자 식별정보가 포함된 문서의 외부 전송은 원내 개인정보 규정을 먼저 확인하세요.").classes("text-xs text-muted")
+                ui.button("첨부 비우기", on_click=clear_docs).props("no-caps flat").style("color:var(--color-accent)")
+            ui.label("ⓘ 판독 안내 — 이미지·PDF는 판독을 실행할 때만 서버를 거쳐 선택한 제공자(Gemini 또는 Google)로 전송됩니다. "
+                     "환자 식별정보가 포함된 문서의 외부 전송은 원내 개인정보 규정을 먼저 확인하세요.").style("font-size:11px;color:var(--a700)")
             render_docs()
 
         # ── 본문
-        box = ui.textarea(label="의무기록 본문 (입원사유 · 과거력 · 검사 · 치료경과 · 최종진단)",
-                          placeholder="예) 70세 남자, 기침·발열로 내원, 흉부 X-ray상 우하엽 폐렴, 고혈압 약 복용 중") \
-            .props("outlined autogrow").classes("w-full").style("min-height:140px")
-
+        with ui.column().classes("kcm-card w-full gap-3"):
+            with ui.row().classes("items-center gap-3 w-full"):
+                ui.label("의무기록 본문 (입원사유 · 과거력 · 검사 · 치료경과 · 최종진단)").style("font-size:12px;color:var(--muted);flex:1")
+                sex = ui.select({"": "성별 미입력", "M": "남", "F": "여"}, value="").props("dense outlined").classes("w-32")
+                age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("w-28")
+            box = ui.textarea(placeholder="예) 70세 남자, 기침·발열로 내원, 흉부 X-ray상 우하엽 폐렴, 고혈압 약 복용 중") \
+                .props("outlined autogrow input-style='min-height:170px'").classes("w-full")
+            with ui.row().classes("gap-2"):
+                btn = ui.button("AI 해석 실행", on_click=lambda: analyze()).props("no-caps unelevated color=primary")
+                ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline")
+            status = ui.label("").classes("text-muted").style("font-size:12px")
+            ui.label("성별·연령을 넣으면 아래 룰 점검에서 불일치 코드를 찾아 줍니다.").classes("text-muted").style("font-size:11px")
         async def run_ocr() -> None:
             sel = [d for d in st["docs"] if d["sel"]]
             if not sel:
@@ -224,8 +274,6 @@ def nlp_page() -> None:
                 ui.notify("판독 결과를 본문에 추가했습니다. 원문과 대조한 뒤 분석하세요.", type="positive")
 
         ocr_btn.on_click(run_ocr)
-        status = ui.label("").classes("text-sm text-muted")
-        btn = ui.button("AI 분석", icon="auto_awesome", on_click=lambda: analyze()).props("no-caps")
         out = ui.column().classes("w-full gap-2")
 
         # ── 청구 목록 · 룰 점검

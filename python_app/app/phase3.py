@@ -132,13 +132,32 @@ def dash_page() -> None:
     week = sum(per_day.get(d, 0) for d in days[-7:])
 
     with ui.column().classes("w-full max-w-6xl gap-3"):
-        ui.label("대시보드").classes("text-xl font-bold")
-        with ui.row().classes("w-full gap-3"):
-            for label, val in [("전체 코딩 건수", len(hist)), ("최근 7일", week),
-                               ("등록 사용자", len(accounts)), ("활성 사용자", sum(1 for a in accounts if a.get("active", True)))]:
-                with ui.column().classes("kcm-card gap-0").style("min-width:170px"):
-                    ui.label(label).classes("text-sm text-muted")
-                    ui.label(f"{val:,}").classes("text-2xl font-bold")
+        ui.label("대시보드").classes("kcm-h1")
+        def pct_of(h: dict) -> float | None:
+            try:
+                return float(str(h.get("pct", "")).replace("%", ""))
+            except ValueError:
+                return None
+        pcts = [p for p in (pct_of(h) for h in hist) if p is not None]
+        avg = sum(pcts) / len(pcts) if pcts else 0.0
+        month = sum(1 for h in hist if str(h.get("at", ""))[:7] == today.strftime("%Y-%m"))
+        active = sum(1 for a_ in accounts if a_.get("active", True))
+        rings = [("이번 달 코딩", month, min(100, month), "이번 달 기록 건수"),
+                 ("평균 정확도", f"{avg:.1f}%", avg, "AI 제안·생성 기록 기준"),
+                 ("최근 7일", week, min(100, week * 5), "최근 7일 코딩 건수"),
+                 ("활성 사용자", active, (active / len(accounts) * 100) if accounts else 0, f"등록 {len(accounts)}명 중")]
+        with ui.element("div").classes("w-full").style("display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px"):
+            for label, shown, ratio, sub in rings:
+                with ui.column().classes("kcm-card items-center gap-1").style("padding:14px"):
+                    ui.echart({
+                        "series": [{"type": "pie", "radius": ["68%", "86%"], "silent": True, "label": {"show": False},
+                                    "data": [{"value": ratio, "itemStyle": {"color": "#6a91b7"}},
+                                             {"value": max(0, 100 - ratio), "itemStyle": {"color": "rgba(135,148,160,.25)"}}]}],
+                        "graphic": [{"type": "text", "left": "center", "top": "center",
+                                     "style": {"text": str(shown), "fill": "#8794a0", "fontSize": 22, "fontWeight": 600}}],
+                    }).style("height:110px;width:110px")
+                    ui.label(label).style("font-family:var(--font-heading);font-weight:600;font-size:16px")
+                    ui.label(sub).classes("text-muted").style("font-size:11px")
         with ui.row().classes("w-full gap-3 no-wrap items-stretch"):
             with ui.column().classes("kcm-card grow").style("min-width:0"):
                 ui.label("최근 14일 코딩 건수").classes("font-semibold")

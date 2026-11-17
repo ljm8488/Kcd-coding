@@ -42,34 +42,92 @@ def require_login(roles: tuple[str, ...] | None = None) -> bool:
 
 
 THEME_CSS = """
-:root{--bg:#f4f7fb;--surface:#ffffff;--surface2:#f1f5f9;--text:#1c2733;--muted:#5b6b7b;
---accent:#1d5fd1;--accent-hi:#1d5fd1;--accent-bg:#e6efff;--divider:#e2e8f0;
---warn:#b85c14;--ok:#2f7d4f;--bad:#c9302c;--shadow:rgba(20,40,70,.08)}
-body.body--dark{--bg:#14181c;--surface:#1a1f24;--surface2:#20262c;--text:#e3e7eb;--muted:#8794a0;
---accent:#6a91b7;--accent-hi:#a9c6e3;--accent-bg:#253546;--divider:rgba(255,255,255,.11);
---warn:#e0a458;--ok:#7bc48a;--bad:#e57373;--shadow:rgba(0,0,0,.3)}
-body{--q-primary:var(--accent)}
-.q-tree__node-header-content{color:var(--text)}
-.q-field--outlined .q-field__control:before{border-color:var(--divider)}
-body,.q-page,.nicegui-content{background:var(--bg)!important;color:var(--text)!important;
- font-family:'Pretendard','Malgun Gothic',system-ui,sans-serif}
+:root{
+--color-bg:#f2f2f3;--color-text:#1d1f20;--color-accent:#5980a6;--color-divider:rgba(29,31,32,.16);
+--surface:#ffffff;--surface-2:#f5f5f8;
+--n100:#f5f5f8;--n200:#e7e7ea;--n300:#d4d4d7;--n600:#7a7a7d;--n700:#5d5d60;--n800:#424244;
+--a100:#eef6ff;--a200:#d6ebff;--a300:#b5d9fd;--a400:#94bce3;--a600:#597ea3;--a700:#416180;--a800:#2c455d;--a900:#1d2d3d;
+--elev-1:0 1px 2px rgba(29,31,32,.05),0 4px 14px rgba(29,31,32,.06);
+--card-line:rgba(29,31,32,.09);
+--warn:#b85c14;--ok:#2f7d4f;--bad:#c9302c;
+--font-heading:'Barlow Condensed','Noto Sans KR','Malgun Gothic',system-ui,sans-serif;
+--font-body:'Barlow','Noto Sans KR','Malgun Gothic',system-ui,sans-serif;
+--bg:var(--color-bg);--text:var(--color-text);--accent:var(--color-accent);--divider:var(--color-divider);
+--muted:rgba(29,31,32,.55);--accent-hi:var(--a700);--accent-bg:var(--a100);--surface2:var(--surface-2)}
+body.body--dark{
+--color-bg:#14181c;--color-text:#e3e7eb;--color-accent:#6a91b7;--color-divider:rgba(255,255,255,.11);
+--surface:#1a1f24;--surface-2:#20262c;
+--n100:#1f252b;--n200:#262d34;--n300:#333b43;--n600:#8794a0;--n700:#a6b0ba;--n800:#c3ccd5;
+--a100:#1f2a35;--a200:#253546;--a300:#2e4862;--a400:#3b5a79;--a600:#6a91b7;--a700:#8fb2d4;--a800:#a9c6e3;--a900:#d6e6f5;
+--elev-1:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.25);--card-line:#2c343c;
+--warn:#e0a458;--ok:#7bc48a;--bad:#e57373;--muted:#8794a0;--accent-hi:#a9c6e3;--accent-bg:#253546}
+body,.q-page,.nicegui-content{background:var(--color-bg)!important;color:var(--color-text)!important;
+ font-family:var(--font-body);font-size:15px;line-height:1.55}
+body{--q-primary:var(--color-accent)}
 .nicegui-content{padding:0!important}
-.kcm-header{background:var(--surface);border-bottom:1px solid var(--divider);padding:0 20px;min-height:56px}
-.kcm-logo{width:30px;height:30px;border-radius:8px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700}
-.kcm-side{width:236px;flex:none;position:sticky;top:76px;align-self:flex-start;margin:24px 0 24px 20px;
- background:var(--surface);border:1px solid var(--divider);border-radius:12px;padding:10px;
- box-shadow:0 1px 2px var(--shadow),0 4px 14px var(--shadow)}
-.kcm-nav{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:var(--text);
- text-decoration:none;font-size:14px}
-.kcm-nav:hover{background:var(--surface2)}
-.kcm-nav.active{background:var(--accent-bg);color:var(--accent-hi);font-weight:600}
-.kcm-main{flex:1 1 0;min-width:0;padding:24px 24px 24px 20px}
-.kcm-card{background:var(--surface);border:1px solid var(--divider);border-radius:12px;padding:20px}
-.q-field__control,.q-table__container,.q-table thead,.q-table tbody td{background:var(--surface)!important;color:var(--text)!important}
-.q-field__label,.q-table th{color:var(--muted)!important}
-.q-table__bottom,.q-table__bottom *{color:var(--muted)!important}
-.q-btn.bg-primary{background:var(--accent)!important}
+::selection{background:color-mix(in srgb,var(--color-accent) 30%,transparent)}
 .text-muted{color:var(--muted)}
+.kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent)}
+.mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
+.kcm-h1,.text-xl.font-bold{font-family:var(--font-heading);font-weight:600;font-size:32px;line-height:1.12;letter-spacing:-.015em}
+.kcm-card{background:var(--surface);border:1px solid var(--card-line);border-radius:12px;box-shadow:var(--elev-1);padding:20px}
+/* 헤더 · 경로 */
+.kcm-header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:1px solid var(--color-divider);
+ box-shadow:0 1px 0 rgba(29,31,32,.04);width:100%}
+.kcm-header-in{max-width:1400px;margin:0 auto;padding:0 20px;min-height:56px;display:flex;align-items:center;gap:8px;width:100%}
+.kcm-logo{flex:none;width:30px;height:30px;border-radius:8px;background:var(--color-accent);color:#fff;display:grid;place-items:center;
+ font-family:var(--font-heading);font-size:15px;box-shadow:0 1px 2px rgba(29,31,32,.15)}
+.kcm-brand{font-family:var(--font-heading);font-size:20px;letter-spacing:.01em;color:var(--color-text);text-decoration:none}
+.kcm-crumb{border-top:1px solid var(--color-divider)}
+.kcm-crumb-in{max-width:1400px;margin:0 auto;padding:8px 20px;display:flex;gap:6px;align-items:center;font-size:12px;width:100%}
+.kcm-crumb a{color:var(--n600);text-decoration:none}
+/* 왼쪽 메뉴 */
+.kcm-shell{flex:1;width:100%;max-width:1400px;margin:0 auto;display:flex;align-items:flex-start;flex-wrap:nowrap}
+.kcm-side{flex:none;width:250px;position:sticky;top:96px;align-self:flex-start;margin:24px 0 24px 20px;
+ background:var(--surface);box-shadow:var(--elev-1);border:1px solid var(--color-divider);border-radius:10px;
+ height:calc((100vh - 148px) / var(--z,1));display:flex;flex-direction:column;overflow:hidden;padding:0}
+.kcm-side-top{flex:1;min-height:0;overflow-y:auto;padding:10px 0 14px;display:grid;gap:12px;align-content:start}
+.kcm-side-head{display:flex;align-items:center;margin:0 10px;padding-bottom:8px;border-bottom:1px solid var(--color-divider)}
+.kcm-side-head b{flex:1;font-family:var(--font-heading);font-size:15px;letter-spacing:.04em;color:var(--n800)}
+.kcm-grp{display:grid;gap:5px;padding:0 10px}
+.kcm-grp-h{display:flex;align-items:center;gap:6px;padding:2px 6px 3px;cursor:pointer;user-select:none}
+.kcm-item{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:40px;padding:0 10px 0 8px;border-radius:10px;
+ font-size:14px;text-decoration:none;color:var(--color-text);transition:transform .14s,box-shadow .14s,background .14s}
+.kcm-item:hover{background:var(--surface-2);transform:translateY(-1px)}
+.kcm-item.active{background:var(--a100);box-shadow:inset 0 0 0 1px var(--a300);font-weight:600;color:var(--a800)}
+.kcm-tile{flex:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--surface-2);color:var(--a800);
+ box-shadow:inset 0 0 0 1px var(--color-divider)}
+.kcm-item.active .kcm-tile{background:var(--color-accent);color:#fff;box-shadow:0 1px 2px rgba(29,31,32,.2)}
+.kcm-sub{margin-left:20px;border-left:2px solid var(--a300);border-radius:6px;min-height:34px;font-size:13px}
+.kcm-acct{flex:none;border-top:1px solid var(--color-divider);padding:12px;display:grid;gap:10px;background:var(--surface-2);
+ box-shadow:0 -6px 12px -8px rgba(0,0,0,.25)}
+.kcm-seg{display:inline-flex;overflow:hidden;border:1px solid var(--color-divider);border-radius:8px;background:var(--surface)}
+.kcm-seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12px;border-radius:6px;white-space:nowrap}
+.kcm-seg button.on{background:var(--color-accent);color:#fff}
+.kcm-tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.02em;padding:3px 10px;border-radius:999px;
+ background:var(--a100);color:var(--a800);white-space:nowrap}
+.kcm-tag-outline{border:1px solid var(--color-accent);background:transparent;color:var(--color-accent)}
+.kcm-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;font-family:var(--font-heading);font-weight:600;
+ font-size:14px;line-height:1.2;color:var(--color-text);background:var(--surface);border:1px solid var(--color-divider);
+ padding:7px 12px;border-radius:8px;white-space:nowrap}
+.kcm-btn:hover{background:color-mix(in srgb,var(--color-text) 7%,var(--surface))}
+.kcm-btn.primary{background:var(--color-accent);border-color:var(--color-accent);color:#fff;box-shadow:0 1px 2px rgba(29,31,32,.14)}
+.kcm-btn.primary:hover{background:var(--a600)}
+body.body--dark .kcm-btn.primary{background:linear-gradient(#6a91b7,#4f7598);box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 2px 4px rgba(0,0,0,.45)}
+.kcm-main{flex:1 1 0;min-width:0;padding:24px 20px 24px 8px}
+/* Quasar 부품 */
+.q-btn{border-radius:8px;font-family:var(--font-heading);font-weight:600;letter-spacing:0}
+.q-btn.bg-primary{background:var(--color-accent)!important;color:#fff!important}
+.q-field--outlined .q-field__control{border-radius:8px;background:var(--surface)!important;color:var(--color-text)!important}
+.q-field--outlined .q-field__control:before{border-color:var(--color-divider)}
+.q-field__control,.q-table__container,.q-table thead,.q-table tbody td{background:var(--surface)!important;color:var(--color-text)!important}
+.q-field__label,.q-table th{color:var(--muted)!important}
+.q-table th{font-size:11px;letter-spacing:.08em;text-transform:uppercase;background:var(--n100)!important}
+.q-table__bottom,.q-table__bottom *{color:var(--muted)!important}
+.q-table__container{border-radius:10px;border:1px solid var(--color-divider)}
+.q-tree__node-header-content{color:var(--color-text)}
+.q-tab{font-family:var(--font-heading);font-weight:600}
+.q-tab--active{color:var(--color-accent)}
 """
 
 NAV = [("search", "검색 · 코드 생성", "search", "/search"),
@@ -77,92 +135,139 @@ NAV = [("search", "검색 · 코드 생성", "search", "/search"),
        ("index", "3권 색인 검색", "menu_book", "/index"),
        ("nlp", "AI 자동 코딩", "auto_awesome", "/nlp"),
        ("history", "코딩 이력", "history", "/history"),
-       ("favs", "개인 코드집", "star", "/favs"),
+       ("favs", "개인 코드집", "star_outline", "/favs"),
        ("dash", "대시보드", "bar_chart", "/dash"),
        ("users", "사용자 관리", "group", "/users"),
        ("kcd", "KCD 데이터", "storage", "/kcd")]
 NAV_ROLES = {"dash": ("sysadmin", "orgadmin"), "users": ("sysadmin", "orgadmin"), "kcd": ("sysadmin",)}
 TITLES = {k: t for k, t, _, _ in NAV}
+NAV_INFO = {k: (icon, href) for k, _, icon, href in NAV}
+NAV_GROUPS = [("조회", ["search", "index", "nlp"]), ("내 작업", ["history", "favs"]), ("관리", ["dash", "users", "kcd"])]
+SCOPE_SHORT = {"sysadmin": "시스템 전체 관리", "orgadmin": "소속 기관 관리", "user": "시스템 사용"}
 
 
 def apply_theme():
-    """라이트/다크 — 사용자의 선택을 브라우저별로 기억한다 (기본: 라이트)."""
+    """라이트/다크 · 화면 크기 — 선택을 브라우저별로 기억한다 (기본: 라이트)."""
+    ui.add_head_html('<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" '
+                     'href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600'
+                     '&family=Noto+Sans+KR:wght@400;500;700&display=swap">')
     app.storage.user.setdefault("dark", False)
     dm = ui.dark_mode().bind_value(app.storage.user, "dark")
     ui.add_css(THEME_CSS)
     app.storage.user.setdefault("zoom", 100)
-    ui.add_css(f"body{{zoom:{int(app.storage.user['zoom'])}%}}")
+    z0 = int(app.storage.user["zoom"])
+    ui.add_css(f"body{{zoom:{z0}%;--z:{z0 / 100}}}")
     return dm
 
 
-def account_menu(dm, u: dict) -> None:
-    """상단 계정 버튼 → 화면 모드(라이트/다크) · 화면 크기(가-/100%/가+) · 로그아웃"""
-    def set_zoom(z: int) -> None:
-        z = max(70, min(150, z))
-        app.storage.user["zoom"] = z
-        zl.set_text(f"{z}%")
-        ui.run_javascript(f"document.body.style.zoom='{z}%'")
-
-    orgs = {o["id"]: o["name"] for o in store.orgs()}
-    with ui.button().props("flat no-caps dense").style("color:var(--text)"):
-        ui.label(f"{u['name']} · {ROLE_LABEL.get(u['role'], u['role'])}").classes("text-sm")
-        ui.icon("expand_more")
-        with ui.menu().props("anchor='bottom right' self='top right'"):
-            with ui.column().classes("kcm-card gap-3").style("width:330px;box-shadow:none"):
-                with ui.row().classes("gap-2"):
-                    ui.badge(ROLE_LABEL.get(u["role"], u["role"])).props("outline")
-                    if orgs.get(u.get("orgId")):
-                        ui.badge(orgs[u["orgId"]]).props("outline")
-                with ui.row().classes("w-full items-center justify-between no-wrap"):
-                    ui.label("데이터 · PC 화면").classes("text-sm text-muted")
-                    ui.label(f"● 실시간 · {dt.datetime.now().strftime('%H:%M')}").classes("text-xs").style("color:var(--ok)")
-                with ui.row().classes("w-full items-center justify-between no-wrap"):
-                    ui.label("화면 모드").classes("text-sm text-muted")
-                    ui.toggle({False: "라이트", True: "다크"}).props("no-caps dense unelevated") \
-                        .bind_value(app.storage.user, "dark")
-                with ui.row().classes("w-full items-center justify-between no-wrap"):
-                    ui.label("화면 크기").classes("text-sm text-muted")
-                    with ui.row().classes("items-center gap-1 no-wrap"):
-                        ui.button("가-", on_click=lambda: set_zoom(int(app.storage.user["zoom"]) - 10)).props("outline dense no-caps")
-                        zl = ui.label(f"{int(app.storage.user['zoom'])}%").classes("text-sm font-bold").style("min-width:48px;text-align:center")
-                        ui.button("가+", on_click=lambda: set_zoom(int(app.storage.user["zoom"]) + 10)).props("outline dense no-caps")
-                        ui.button("100%", on_click=lambda: set_zoom(100)).props("flat dense no-caps")
-                ui.separator()
-                with ui.row().classes("w-full items-center justify-between no-wrap"):
-                    ui.label(u.get("id", "")).classes("text-xs text-muted")
-                    ui.button("로그아웃", on_click=logout).props("flat dense no-caps").style("color:var(--accent-hi)")
-
-
 def theme_toggle(dm) -> None:
-    btn = ui.button(on_click=lambda: dm.set_value(not dm.value)).props("flat round dense").style("color:var(--text)")
+    btn = ui.button(on_click=lambda: dm.set_value(not dm.value)).props("flat round dense").style("color:var(--color-text)")
     with btn:
         ui.icon("dark_mode").bind_name_from(app.storage.user, "dark", backward=lambda d: "light_mode" if d else "dark_mode")
         ui.tooltip("라이트 / 다크 모드 전환")
 
 
+def account_panel(dm, u: dict) -> None:
+    """왼쪽 메뉴 하단 고정 패널 — 역할 · 데이터 상태 · 화면 모드 · 화면 크기 · 계정 · 로그아웃 (원본과 같은 구성)"""
+    def set_zoom(z: int) -> None:
+        z = max(70, min(150, z))
+        app.storage.user["zoom"] = z
+        zoom_lbl.set_text(f"{z}%")
+        ui.run_javascript(f"document.body.style.zoom='{z}%';document.body.style.setProperty('--z','{z / 100}')")
+
+    def set_dark(v: bool) -> None:
+        dm.set_value(v)
+        (dark_b.classes(add="on"), light_b.classes(remove="on")) if v else (light_b.classes(add="on"), dark_b.classes(remove="on"))
+
+    with ui.element("div").classes("kcm-acct"):
+        with ui.row().classes("items-center gap-2 no-wrap").style("flex-wrap:wrap"):
+            ui.html(f'<span class="kcm-tag">{ROLE_LABEL.get(u["role"], u["role"])}</span>')
+            ui.label(SCOPE_SHORT.get(u["role"], "")).classes("text-muted").style("font-size:11px")
+        with ui.row().classes("w-full items-center justify-between no-wrap"):
+            ui.label("데이터 · PC 화면").classes("text-muted").style("font-size:12px")
+            ui.label(f"● 실시간 · {dt.datetime.now().strftime('%H:%M')}").style("font-size:11px;color:var(--ok);white-space:nowrap")
+        with ui.row().classes("w-full items-center justify-between no-wrap"):
+            ui.label("화면 모드").classes("text-muted").style("font-size:12px")
+            with ui.element("div").classes("kcm-seg"):
+                dark_now = bool(app.storage.user.get("dark"))
+                light_b = ui.element("button").classes("" if dark_now else "on").on("click", lambda: set_dark(False))
+                with light_b:
+                    ui.label("라이트")
+                dark_b = ui.element("button").classes("on" if dark_now else "").on("click", lambda: set_dark(True))
+                with dark_b:
+                    ui.label("다크")
+        with ui.row().classes("w-full items-center justify-between no-wrap"):
+            ui.label("화면 크기").classes("text-muted").style("font-size:12px")
+            with ui.row().classes("items-center gap-1 no-wrap"):
+                with ui.element("div").classes("kcm-btn").style("min-height:30px;padding:0 8px").on(
+                        "click", lambda: set_zoom(int(app.storage.user["zoom"]) - 10)):
+                    ui.label("가-")
+                zoom_btn = ui.element("div").classes("kcm-btn mono").style("min-height:30px;min-width:56px;padding:0 8px;font-size:12px")
+                with zoom_btn:
+                    zoom_lbl = ui.label(f"{int(app.storage.user['zoom'])}%")
+                zoom_btn.on("click", lambda: set_zoom(100))
+                with ui.element("div").classes("kcm-btn").style("min-height:30px;padding:0 8px").on(
+                        "click", lambda: set_zoom(int(app.storage.user["zoom"]) + 10)):
+                    ui.label("가+")
+        with ui.row().classes("w-full items-center justify-between no-wrap"):
+            ui.label(u.get("id", "")).classes("text-muted mono").style(
+                "font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+            ui.button("로그아웃", on_click=logout).props("flat dense no-caps").style("color:var(--color-accent)")
+
+
 def layout(active: str) -> None:
-    """원본과 같은 구성 — 상단 헤더(로고·위치) + 왼쪽 메뉴 카드 + 본문. 이후 요소는 본문에 들어간다."""
+    """원본과 같은 구성 — 상단 헤더(K 로고) + 경로 표시줄 + 그룹형 왼쪽 메뉴(하단 계정 패널) + 본문. 이후 요소는 본문에 들어간다."""
     u = user()
     dm = apply_theme()
-    with ui.row().classes("kcm-header w-full items-center justify-between no-wrap").style("position:sticky;top:0;z-index:30"):
-        with ui.row().classes("items-center gap-3 no-wrap"):
-            ui.label("심").classes("kcm-logo")
-            ui.label("심사 코딩마스터").classes("text-xl font-bold")
-            ui.label("/").classes("text-muted")
-            ui.label(TITLES.get(active, "")).classes("text-sm")
-        with ui.row().classes("items-center gap-3 no-wrap"):
-            account_menu(dm, u)
-    row = ui.row().classes("w-full no-wrap items-start gap-0")
-    with row:
+    with ui.element("header").classes("kcm-header"):
+        with ui.element("div").classes("kcm-header-in"):
+            with ui.link(target="/search").style("text-decoration:none;display:flex;align-items:center;gap:8px"):
+                ui.label("K").classes("kcm-logo")
+                ui.label("심사 코딩마스터").classes("kcm-brand")
+        with ui.element("div").classes("kcm-crumb"):
+            with ui.element("nav").classes("kcm-crumb-in"):
+                ui.link("홈", "/search")
+                ui.label("/").classes("text-muted")
+                ui.label(TITLES.get(active, ""))
+    shell = ui.element("div").classes("kcm-shell")
+    with shell:
         with ui.element("aside").classes("kcm-side"):
-            for key, label, icon, href in NAV:
-                if key in NAV_ROLES and u["role"] not in NAV_ROLES[key]:
-                    continue
-                with ui.link(target=href).classes("kcm-nav" + (" active" if key == active else "")).style("text-decoration:none"):
-                    ui.icon(icon).classes("text-lg")
-                    ui.label(label)
+            with ui.element("div").classes("kcm-side-top"):
+                with ui.element("div").classes("kcm-side-head"):
+                    ui.html("<b>메뉴</b>").style("flex:1")
+                for title, keys in NAV_GROUPS:
+                    keys = [k for k in keys if not (k in NAV_ROLES and u["role"] not in NAV_ROLES[k])]
+                    if not keys:
+                        continue
+                    with ui.element("nav").classes("kcm-grp"):
+                        body = ui.element("div").style("display:grid;gap:5px")
+                        caret = None
+                        with ui.element("div").classes("kcm-grp-h") as head:
+                            caret = ui.label("▾").style("font-size:10px;width:10px;color:var(--n600)")
+                            ui.label(title).classes("kicker").style("flex:1")
+
+                        def toggle(_=None, body=body, caret=caret) -> None:
+                            body.set_visibility(not body.visible)
+                            caret.set_text("▾" if body.visible else "▸")
+                        head.on("click", toggle)
+                        body.move(head.parent_slot.parent)  # 머리글 아래에 본문 배치
+                        with body:
+                            for key in keys:
+                                icon, href = NAV_INFO[key]
+                                with ui.link(target=href).classes("kcm-item" + (" active" if key == active else "")):
+                                    with ui.row().classes("items-center no-wrap gap-2"):
+                                        with ui.element("span").classes("kcm-tile"):
+                                            ui.icon(icon).classes("text-lg")
+                                        ui.label(TITLES[key]).style("white-space:nowrap")
+                                if key == "search":
+                                    with ui.link(target="/cond").classes("kcm-item kcm-sub" + (" active" if active == "cond" else "")):
+                                        with ui.row().classes("items-center no-wrap gap-2"):
+                                            with ui.element("span").classes("kcm-tile").style("width:24px;height:24px;border-radius:6px"):
+                                                ui.icon("tune").classes("text-base")
+                                            ui.label("조건 설정").style("white-space:nowrap")
+            account_panel(dm, u)
     main = ui.column().classes("kcm-main gap-3")
-    main.move(row)
+    main.move(shell)
     main.__enter__()
 
 
@@ -188,39 +293,79 @@ def login_page() -> None:
         return
     orgs = [o for o in store.orgs() if o.get("active", True)]
     org_opts = {o["id"]: o["name"] for o in orgs}
-    state = {"mode": "emp", "org": next(iter(org_opts), ""), "id": "", "pw": ""}
+    state = {"mode": "emp", "org": next(iter(org_opts), ""), "id": app.storage.user.get("saved_id", ""), "pw": "",
+             "save": bool(app.storage.user.get("saved_id"))}
+    MODES = {"emp": ("사번", "사번", "예: 1001"), "gmail": ("Gmail", "Gmail 주소", "name@gmail.com"),
+             "admin": ("시스템 관리자", "관리자 ID", "admin")}
 
     dm = apply_theme()
     with ui.row().classes("absolute-top-right p-3"):
         theme_toggle(dm)
-    with ui.column().classes("kcm-card absolute-center w-96 gap-3"):
-        ui.label("심사 코딩마스터").classes("text-2xl font-bold")
-        ui.label("소속기관을 선택하고 사번 또는 Gmail로 로그인하십시오.").classes("text-sm text-muted")
-        if not store.configured():
-            ui.label("⚠ SUPABASE_URL / SUPABASE_KEY 설정이 없어 계정을 불러올 수 없습니다.").classes("text-red-600 text-sm")
-        org_sel = ui.select(org_opts, label="소속기관", value=state["org"]).classes("w-full")
-        org_sel.bind_value(state, "org")
-        mode = ui.toggle({"emp": "사번", "gmail": "Gmail", "admin": "시스템 관리자"}, value="emp").classes("w-full")
-        mode.bind_value(state, "mode")
-        ident = ui.input("사번 / Gmail / admin").classes("w-full").bind_value(state, "id")
-        pw = ui.input("비밀번호", password=True, password_toggle_button=True).classes("w-full").bind_value(state, "pw")
-        err = ui.label("").classes("text-red-600 text-sm")
+    with ui.element("div").style("min-height:100vh;width:100%;display:grid;place-items:center;padding:40px 20px"):
+        with ui.column().classes("gap-0").style("width:min(420px,100%)"):
+            ui.label("심사 코딩마스터").style("font-family:var(--font-heading);font-weight:600;font-size:38px;line-height:1.12;white-space:nowrap")
+            ui.label("소속기관을 선택하고 사번 또는 Gmail로 로그인하십시오.").classes("text-muted").style("font-size:13px;margin:6px 0 24px")
+            with ui.column().classes("kcm-card w-full gap-4").style("padding:22px"):
+                err = ui.label("").style("display:none;border:1px solid var(--color-accent);border-radius:10px;background:var(--a100);"
+                                         "padding:10px 12px;font-size:13px;color:var(--a900)")
+                if not store.configured():
+                    ui.label("⚠ SUPABASE_URL / SUPABASE_KEY 설정이 없어 계정을 불러올 수 없습니다.").style("color:var(--bad);font-size:13px")
+                with ui.column().classes("w-full gap-1"):
+                    ui.label("소속기관").style("font-size:12px;color:var(--muted)")
+                    ui.select(org_opts, value=state["org"]).props("dense outlined").classes("w-full").bind_value(state, "org")
+                with ui.column().classes("w-full gap-1"):
+                    ui.label("로그인 방식").style("font-size:12px;color:var(--muted)")
+                    with ui.element("div").style("display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%"):
+                        mode_btns = {}
+                        for k, (lab, _, _) in MODES.items():
+                            b = ui.element("button").style("display:flex;align-items:center;justify-content:center;min-height:46px;padding:6px 8px;"
+                                                           "border-radius:10px;cursor:pointer;font-size:14px;border:1px solid var(--color-divider)")
+                            with b:
+                                ui.label(lab)
+                            mode_btns[k] = b
+                lbl_id = ui.label("").style("font-size:12px;color:var(--muted);margin-bottom:-12px")
+                ident = ui.input().props("dense outlined").classes("w-full mono").bind_value(state, "id")
+                ui.label("비밀번호").style("font-size:12px;color:var(--muted);margin-bottom:-12px")
+                pw = ui.input(password=True, password_toggle_button=True, placeholder="비밀번호").props("dense outlined").classes("w-full").bind_value(state, "pw")
 
-        def do_login() -> None:
-            accounts = store.accounts(fresh=True)
-            all_orgs = store.orgs(fresh=True)
-            u, msg = authenticate(state["mode"], state["id"], state["pw"], state["org"],
-                                  accounts, all_orgs, store.sys_admin(fresh=True))
-            if not u:
-                err.set_text(msg)
-                return
-            u["tempPw"] = u.pop("pwTemp", False)
-            app.storage.user["user"] = u
-            ui.navigate.to("/search")
+                def set_mode(k: str) -> None:
+                    state["mode"] = k
+                    lbl_id.set_text(MODES[k][1])
+                    ident.props(f'placeholder="{MODES[k][2]}"')
+                    for kk, b in mode_btns.items():
+                        on = kk == k
+                        b.style("background:var(--a100);border-color:var(--color-accent);color:var(--a800);font-weight:600" if on
+                                else "background:var(--surface);border-color:var(--color-divider);color:var(--color-text);font-weight:400")
+                for k, b in mode_btns.items():
+                    b.on("click", lambda _, k=k: set_mode(k))
+                set_mode("emp")
+                with ui.row().classes("w-full items-center justify-between"):
+                    ui.checkbox("아이디 저장").bind_value(state, "save").style("font-size:13px")
 
-        pw.on("keydown.enter", do_login)
-        ui.button("로그인", on_click=do_login).classes("w-full")
+                def do_login() -> None:
+                    accounts = store.accounts(fresh=True)
+                    all_orgs = store.orgs(fresh=True)
+                    u, msg = authenticate(state["mode"], state["id"], state["pw"], state["org"],
+                                          accounts, all_orgs, store.sys_admin(fresh=True))
+                    if not u:
+                        err.set_text(msg)
+                        err.style("display:block")
+                        return
+                    u["tempPw"] = u.pop("pwTemp", False)
+                    app.storage.user["user"] = u
+                    if state["save"]:
+                        app.storage.user["saved_id"] = state["id"]
+                    else:
+                        app.storage.user.pop("saved_id", None)
+                    ui.navigate.to("/search")
 
+                pw.on("keydown.enter", do_login)
+                ident.on("keydown.enter", do_login)
+                ui.button("로그인", on_click=do_login).props("no-caps unelevated color=primary").classes("w-full").style("min-height:46px;font-size:15px")
+                with ui.row().classes("w-full items-center justify-between"):
+                    ui.label("● 공용 DB 연결" if store.configured() else "● 연결 안 됨").style(
+                        "font-size:11px;color:var(--ok)" if store.configured() else "font-size:11px;color:var(--bad)")
+                    ui.label("비밀번호를 모르면 소속 기관 관리자에게 초기화를 요청하세요.").classes("text-muted").style("font-size:11px")
 
 @ui.page("/")
 def index_page() -> None:

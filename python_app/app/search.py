@@ -58,12 +58,14 @@ class KcdIndex:
                 continue
             if whole in r.keys:
                 score = 0
+            elif any(k.endswith(whole) for k in r.keys):
+                score = 1          # 한국어 병명은 핵심어가 끝에 온다 (예: 세균성 폐렴)
             elif any(k.startswith(whole) for k in r.keys):
-                score = 1
-            elif any(whole in k for k in r.keys):
                 score = 2
-            else:
+            elif any(whole in k for k in r.keys):
                 score = 3
+            else:
+                score = 4
             out.append((score, len(r.ko), r))
         out.sort(key=lambda t: (t[0], t[1], t[2].code))
         return [t[2] for t in out[:limit]]
