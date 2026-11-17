@@ -342,6 +342,8 @@ def search_page() -> None:
                 pos = [i for i, k in enumerate(order) if k in new]
                 for p, k in zip(pos, new):
                     order[p] = k
+            else:
+                return
             save_pref()
             render_bar()
             render_area()

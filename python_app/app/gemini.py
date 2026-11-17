@@ -137,6 +137,21 @@ def semantic(query: str) -> dict:
     return json.loads(txt)
 
 
+TERMS_SCHEMA = {"type": "OBJECT", "properties": {"terms": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+    "term": {"type": "STRING"}, "kind": {"type": "STRING"}, "meaning": {"type": "STRING"}, "english": {"type": "STRING"},
+    "note": {"type": "STRING"}}, "required": ["term", "meaning"]}}}, "required": ["terms"]}
+
+
+def interpret_terms(text: str) -> list[dict]:
+    """의무기록에서 의학용어 · 약어를 찾아 표준 한글 용어로 해석한다 (판독 결과의 약어 풀이)."""
+    sysmsg = ("당신은 한국의 보건의료정보관리사이자 의학용어 전문가입니다. 의무기록 본문에서 의학용어와 약어(영문 약어·기호 포함)를 찾아 "
+              "표준 한글 의학용어로 해석합니다. term 은 본문에 쓰인 표기 그대로, kind 는 '약어' 또는 '용어', meaning 은 표준 한글 용어, "
+              "english 는 영문 정식 명칭, note 는 코딩 시 유의점(없으면 빈 문자열). 이미 쉬운 한글로 풀어 쓴 일반 단어는 제외하고 최대 30개. "
+              "OCR 오탈자로 보이면 note 에 '판독 오류 가능' 이라고 적으세요. 본문에 없는 용어를 만들지 마세요.")
+    txt = generate(sysmsg, [{"text": "의무기록:\n" + text.strip()[:6000]}], TERMS_SCHEMA, 3072)
+    return json.loads(txt).get("terms", [])
+
+
 def suggest(text: str, dept: str = "", purpose: str = "") -> dict:
     key = api_key()
     if not key:

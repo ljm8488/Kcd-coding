@@ -8,9 +8,11 @@ import os
 import random
 from pathlib import Path
 
+import httpx
+from nicegui import run as nrun
 from nicegui import app, ui
 
-from . import store
+from . import kcd_sync, store
 from .search import KcdIndex
 from .security import ROLE_LABEL, acc_status, authenticate, is_gmail, pw_key
 
@@ -74,18 +76,20 @@ body{--q-primary:var(--color-accent)}
 /* 헤더 · 경로 */
 .kcm-header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:1px solid var(--color-divider);
  box-shadow:0 1px 0 rgba(29,31,32,.04);width:100%}
-.kcm-header-in{max-width:1400px;margin:0 auto;padding:0 20px;min-height:56px;display:flex;align-items:center;gap:8px;width:100%}
+.kcm-header-in{max-width:1560px;margin:0 auto;padding:0 20px;min-height:56px;display:flex;align-items:center;gap:8px;width:100%}
 .kcm-logo{flex:none;width:30px;height:30px;border-radius:8px;background:var(--color-accent);color:#fff;display:grid;place-items:center;
  font-family:var(--font-heading);font-size:15px;box-shadow:0 1px 2px rgba(29,31,32,.15)}
 .kcm-brand{font-family:var(--font-heading);font-size:20px;letter-spacing:.01em;color:var(--color-text);text-decoration:none}
 .kcm-crumb{border-top:1px solid var(--color-divider)}
-.kcm-crumb-in{max-width:1400px;margin:0 auto;padding:8px 20px;display:flex;gap:6px;align-items:center;font-size:12px;width:100%}
+.kcm-crumb-in{max-width:1560px;margin:0 auto;padding:8px 20px;display:flex;gap:6px;align-items:center;font-size:12px;width:100%}
 .kcm-crumb a{color:var(--n600);text-decoration:none}
 /* 왼쪽 메뉴 */
-.kcm-shell{flex:1;width:100%;max-width:1400px;margin:0 auto;display:flex;align-items:flex-start;flex-wrap:nowrap}
+.kcm-shell{flex:1;width:100%;max-width:1560px;margin:0 auto;display:flex;align-items:flex-start;flex-wrap:nowrap}
 .kcm-side{flex:none;width:250px;position:sticky;top:96px;align-self:flex-start;margin:24px 0 24px 20px;
  background:var(--surface);box-shadow:var(--elev-1);border:1px solid var(--color-divider);border-radius:10px;
  height:calc(100vh / var(--z,1) - 148px);display:flex;flex-direction:column;overflow:hidden;padding:0}
+.dnd-dragging{opacity:.4}.dnd-over{outline:2px dashed var(--color-accent);outline-offset:2px;border-radius:10px}
+.kcm-grp-h{cursor:grab}.kcm-item{-webkit-user-drag:element}
 .kcm-side-top{flex:1;min-height:0;overflow-y:auto;padding:10px 0 14px;display:grid;gap:12px;align-content:start}
 .kcm-side-head{display:flex;align-items:center;margin:0 10px;padding-bottom:8px;border-bottom:1px solid var(--color-divider)}
 .kcm-side-head b{flex:1;font-family:var(--font-heading);font-size:15px;letter-spacing:.04em;color:var(--n800)}
@@ -131,8 +135,7 @@ body.body--dark .kcm-btn.primary{background:linear-gradient(#6a91b7,#4f7598);box
 /* ── 반응형: 큰 모니터는 넓게, 작은 화면은 메뉴를 서랍으로 ── */
 .kcm-menu-btn{display:none!important}
 .kcm-backdrop{display:none}
-@media (min-width:1700px){.kcm-shell,.kcm-header-in,.kcm-crumb-in{max-width:1840px}}
-@media (min-width:2300px){.kcm-shell,.kcm-header-in,.kcm-crumb-in{max-width:2200px}}
+.kcm-main>*{width:100%;max-width:1260px!important;margin-left:0;margin-right:auto}   /* 본문은 메뉴 바로 옆에서 시작 — 메뉴와 본문 사이 빈 공간 없음 */
 @media (max-width:1199px){.kcm-card{padding:16px}.kcm-h1,.text-xl.font-bold{font-size:30px}.kcm-side{width:220px}}
 @media (max-width:900px){
  .kcm-menu-btn{display:inline-flex!important}
@@ -170,7 +173,7 @@ NAV_GROUPS = [("조회", ["search", "index", "nlp"]), ("내 작업", ["history",
 SCOPE_SHORT = {"sysadmin": "시스템 전체 관리", "orgadmin": "소속 기관 관리", "user": "시스템 사용"}
 
 
-UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols")
+UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols", "nav_groups", "nav_items")
 
 
 def load_ui_pref() -> None:
@@ -320,36 +323,84 @@ def layout(active: str) -> None:
             with ui.element("div").classes("kcm-side-top"):
                 with ui.element("div").classes("kcm-side-head"):
                     ui.html("<b>메뉴</b>").style("flex:1")
-                for title, keys in NAV_GROUPS:
-                    keys = [k for k in keys if not (k in NAV_ROLES and u["role"] not in NAV_ROLES[k])]
-                    if not keys:
-                        continue
-                    with ui.element("nav").classes("kcm-grp"):
-                        body = ui.element("div").style("display:grid;gap:5px")
-                        caret = None
-                        with ui.element("div").classes("kcm-grp-h") as head:
-                            caret = ui.label("▾").style("font-size:10px;width:10px;color:var(--n600)")
-                            ui.label(title).classes("kicker").style("flex:1")
+                    ui.label("끌어서 순서 변경").classes("text-muted").style("font-size:10px")
+                    ui.button(icon="restart_alt", on_click=lambda: reset_nav()).props("flat round dense size=sm").tooltip("메뉴 순서 초기화")
+                nav_box = ui.element("div").style("display:grid;gap:12px")
 
-                        def toggle(_=None, body=body, caret=caret) -> None:
-                            body.set_visibility(not body.visible)
-                            caret.set_text("▾" if body.visible else "▸")
-                        head.on("click", toggle)
-                        body.move(head.parent_slot.parent)  # 머리글 아래에 본문 배치
-                        with body:
-                            for key in keys:
-                                icon, href = NAV_INFO[key]
-                                with ui.link(target=href).classes("kcm-item" + (" active" if key == active else "")):
-                                    with ui.row().classes("items-center no-wrap gap-2"):
-                                        with ui.element("span").classes("kcm-tile"):
-                                            ui.icon(icon).classes("text-lg")
-                                        ui.label(TITLES[key]).style("white-space:nowrap")
-                                if key == "search":
-                                    with ui.link(target="/cond").classes("kcm-item kcm-sub" + (" active" if active == "cond" else "")):
-                                        with ui.row().classes("items-center no-wrap gap-2"):
-                                            with ui.element("span").classes("kcm-tile").style("width:24px;height:24px;border-radius:6px"):
-                                                ui.icon("tune").classes("text-base")
-                                            ui.label("조건 설정").style("white-space:nowrap")
+                default_groups = dict(NAV_GROUPS)
+
+                def ordered_groups() -> list[tuple[str, list[str]]]:
+                    """저장된 사용자별 순서 → (그룹, 메뉴) 목록. 새 메뉴나 권한 없는 메뉴는 알아서 맞춘다."""
+                    gp = app.storage.user.get("nav_groups") or []
+                    its = app.storage.user.get("nav_items") or {}
+                    titles = [t for t in gp if t in default_groups] + [t for t, _ in NAV_GROUPS if t not in gp]
+                    out = []
+                    for title in titles:
+                        saved = [k for k in (its.get(title) or []) if k in default_groups[title]]
+                        keys = saved + [k for k in default_groups[title] if k not in saved]
+                        keys = [k for k in keys if not (k in NAV_ROLES and u["role"] not in NAV_ROLES[k])]
+                        if keys:
+                            out.append((title, keys))
+                    return out
+
+                def render_nav() -> None:
+                    nav_box.clear()
+                    with nav_box:
+                        for title, keys in ordered_groups():
+                            with ui.element("nav").classes("kcm-grp").props(f'data-dnd="navgrp" data-key="{title}"'):
+                                body = ui.element("div").style("display:grid;gap:5px")
+                                with ui.element("div").classes("kcm-grp-h").props(
+                                        'draggable="true" title="끌어서 그룹 순서 변경 · 클릭: 접기/펴기"') as head:
+                                    caret = ui.label("▾").style("font-size:10px;width:10px;color:var(--n600)")
+                                    ui.label(title).classes("kicker").style("flex:1")
+
+                                def toggle(_=None, body=body, caret=caret) -> None:
+                                    body.set_visibility(not body.visible)
+                                    caret.set_text("▾" if body.visible else "▸")
+                                head.on("click", toggle)
+                                body.move(head.parent_slot.parent)  # 머리글 아래에 본문 배치
+                                with body:
+                                    for key in keys:
+                                        icon, href = NAV_INFO[key]
+                                        with ui.link(target=href).classes("kcm-item" + (" active" if key == active else "")).props(
+                                                f'draggable="true" data-dnd="nav:{title}" data-key="{key}" title="끌어서 순서 변경"'):
+                                            with ui.row().classes("items-center no-wrap gap-2"):
+                                                with ui.element("span").classes("kcm-tile"):
+                                                    ui.icon(icon).classes("text-lg")
+                                                ui.label(TITLES[key]).style("white-space:nowrap")
+                                        if key == "search":
+                                            with ui.link(target="/cond").classes("kcm-item kcm-sub" + (" active" if active == "cond" else "")):
+                                                with ui.row().classes("items-center no-wrap gap-2"):
+                                                    with ui.element("span").classes("kcm-tile").style("width:24px;height:24px;border-radius:6px"):
+                                                        ui.icon("tune").classes("text-base")
+                                                    ui.label("조건 설정").style("white-space:nowrap")
+
+                def save_nav() -> None:
+                    save_ui_pref(nav_groups=app.storage.user.get("nav_groups") or [], nav_items=app.storage.user.get("nav_items") or {})
+
+                def on_nav_dnd(e) -> None:
+                    a = e.args or {}
+                    g, new = str(a.get("group", "")), list(a.get("order") or [])
+                    if g == "navgrp":
+                        app.storage.user["nav_groups"] = [t for t in new if t in default_groups]
+                    elif g.startswith("nav:") and g[4:] in default_groups:
+                        title = g[4:]
+                        its = dict(app.storage.user.get("nav_items") or {})
+                        its[title] = [k for k in new if k in default_groups[title]]
+                        app.storage.user["nav_items"] = its
+                    else:
+                        return
+                    save_nav()
+                    render_nav()
+
+                def reset_nav() -> None:
+                    app.storage.user["nav_groups"] = []
+                    app.storage.user["nav_items"] = {}
+                    save_nav()
+                    render_nav()
+                    ui.notify("메뉴 순서를 처음대로 되돌렸습니다.")
+                ui.on("dnd_reorder", on_nav_dnd)
+                render_nav()
             account_panel(dm, u)
         ui.element("div").classes("kcm-backdrop").on(
             "click", js_handler="() => document.querySelector('.kcm-side').classList.remove('open')")
@@ -389,7 +440,7 @@ def login_page() -> None:
     dm = apply_theme()
     with ui.row().classes("absolute-top-right p-3"):
         theme_toggle(dm)
-    with ui.element("div").style("min-height:100vh;width:100%;display:grid;place-items:center;padding:40px 20px"):
+    with ui.element("div").style("min-height:calc(100vh / var(--z, 1));width:100%;display:grid;place-items:center;padding:40px 20px"):
         with ui.column().classes("gap-0").style("width:min(420px,100%)"):
             ui.label("심사 코딩마스터").style("font-family:var(--font-heading);font-weight:600;font-size:38px;line-height:1.12;white-space:nowrap")
             ui.label("소속기관을 선택하고 사번 또는 Gmail로 로그인하십시오.").classes("text-muted").style("font-size:13px;margin:6px 0 24px")
@@ -462,7 +513,7 @@ def index_page() -> None:
 
 
 # ───────────────────────── KCD 데이터 ─────────────────────────
-def _parse_kcd(name: str, raw: bytes) -> list[list[str]]:
+def _parse_kcd(name: str, raw: bytes) -> list[list]:
     def norm_code(x: str) -> str:
         return str(x or "").strip().upper()
 
@@ -488,15 +539,17 @@ def _parse_kcd(name: str, raw: bytes) -> list[list[str]]:
         table = list(csv.reader(io.StringIO(text)))
     ci = ko = en = sy = -1
     start = 0
+    hdr: list[str] = []
     for i, row in enumerate(table[:30]):
         cells = [c.replace(" ", "") for c in row]
-        c_i = next((j for j, c in enumerate(cells) if c.endswith("코드") or c.lower() == "code"), -1)
+        c_i = next((j for j, c in enumerate(cells) if c.endswith("코드") or c.endswith("기호") or c.lower() == "code"), -1)
         k_i = next((j for j, c in enumerate(cells) if j != c_i and any(w in c for w in ("한글", "국문", "상병명", "질병명", "분류명", "명칭"))), -1)
         if c_i >= 0 and k_i >= 0:
             ci, ko = c_i, k_i
             en = next((j for j, c in enumerate(cells) if "영문" in c or c.lower() == "english"), -1)
             sy = next((j for j, c in enumerate(cells) if "동의어" in c or "별칭" in c or "약어" in c), -1)
             start = i + 1
+            hdr = cells
             break
     if ci < 0:
         ci, ko, start = 0, 1, 0
@@ -508,8 +561,14 @@ def _parse_kcd(name: str, raw: bytes) -> list[list[str]]:
         if not code or not kname or code in seen or not code[0].isalpha():
             continue
         seen.add(code)
-        rows.append([code, kname, str(r[en]).strip() if 0 <= en < len(r) else "",
-                     "|".join(x.strip() for x in str(r[sy]).replace(";", ",").split(",") if x.strip()) if 0 <= sy < len(r) else ""])
+        row = [code, kname, str(r[en]).strip() if 0 <= en < len(r) else "",
+               "|".join(x.strip() for x in str(r[sy]).replace(";", ",").split(",") if x.strip()) if 0 <= sy < len(r) else ""]
+        if hdr and any(h in kcd_sync.FIELD_ALIASES["sex"] + kcd_sync.FIELD_ALIASES["max"] + kcd_sync.FIELD_ALIASES["primary"] for h in hdr):
+            rec = {h: (r[j] if j < len(r) else "") for j, h in enumerate(hdr)}
+            row.append(kcd_sync.extras_of(rec))
+            if "." not in code and len(code) > 3 and code[1:].isdigit():   # 점 없는 공공데이터 상병기호 → A00.0 형태
+                row[0] = kcd_sync.dotted(code)
+        rows.append(row)
     if len(rows) < 10:
         raise ValueError("코드 · 한글명 열을 찾지 못했습니다. 첫 행에 '코드', '한글명' 머리글이 있는지 확인하세요.")
     return rows
@@ -520,30 +579,137 @@ def kcd_page() -> None:
     if not require_login(("sysadmin",)):
         return
     layout("kcd")
+    from . import kcd_sync
     m = store.kcd_master(fresh=True)
-    with ui.column().classes("w-full max-w-3xl mx-auto p-4 gap-3"):
-        ui.label("KCD 데이터").classes("text-xl font-bold")
-        ui.label(f"현재: {m.get('name') or '(없음)'} · {len(m.get('rows', [])):,}건 · 적재 {m.get('at', '')}")
-        ui.label("CSV(UTF-8/CP949) 또는 XLSX 파일을 올리면 모든 사용자에게 적용됩니다. 첫 행에 '코드', '한글명' 머리글이 필요합니다.").classes("text-sm text-gray-500")
-        status = ui.label("")
+    env_key = os.environ.get("DATA_GO_KR_KEY", "").strip()
 
-        async def on_upload(e) -> None:
-            try:
-                f = getattr(e, "file", None)
-                name = f.name if f else e.name
-                raw = await f.read() if f else e.content.read()
-                rows = _parse_kcd(name, raw)
-                data = {"name": name, "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "by": user()["id"], "rows": rows}
-                store.put("global", "kcdMaster", data, by=user()["id"])
-                get_index(fresh=True)
-                status.set_text(f"적재 완료 — {len(rows):,}건")
-                ui.notify(f"KCD {len(rows):,}건을 적재했습니다.", type="positive")
-            except Exception as ex:  # noqa: BLE001
-                status.set_text(f"적재 실패 — {ex}")
-                ui.notify(str(ex), type="negative")
+    def stored_key() -> str:
+        v = store.get("global", "dataGoKey", "", fresh=True)
+        return (v if isinstance(v, str) else (v or {}).get("key", "")).strip()
 
-        ui.upload(on_upload=on_upload, auto_upload=True, label="파일 선택").props("accept=.csv,.xlsx,.xlsm").classes("w-full")
+    with ui.column().classes("w-full gap-4").style("max-width:1000px"):
+        ui.label("KCD 데이터").classes("kcm-h1")
+        ui.label("검색·AI 코딩·룰 점검이 쓰는 상병마스터를 관리합니다. 적재하면 모든 사용자에게 적용됩니다.").classes("text-muted").style("font-size:13px;margin-top:-8px")
+
+        # ── 현재 데이터
+        with ui.column().classes("kcm-card w-full gap-1"):
+            ui.label("현재 적재된 데이터").classes("kicker")
+            cur = ui.label("").style("font-family:var(--font-heading);font-weight:600;font-size:22px")
+            cur_sub = ui.label("").classes("text-muted").style("font-size:12px")
+
+            def show_current() -> None:
+                mm = store.kcd_master(fresh=True)
+                rows = mm.get("rows", [])
+                en_n = sum(1 for r in rows if len(r) > 2 and r[2])
+                ex_n = sum(1 for r in rows if len(r) > 4 and r[4])
+                cur.set_text(f"{mm.get('name') or '(없음)'}")
+                cur_sub.set_text(f"{len(rows):,}건 · 영문명 {en_n:,}건 · 성별/연령/주상병 부가정보 {ex_n:,}건 · 적재 {mm.get('at', '')}"
+                                 + (f" · {mm['source']}" if mm.get("source") else ""))
+            show_current()
+
+        # ── 공공데이터포털 자동 불러오기
+        with ui.column().classes("kcm-card w-full gap-3"):
+            ui.label("공공데이터포털에서 자동 불러오기").classes("kicker")
+            ui.label("건강보험심사평가원 ‘상병마스터’(KCD 기반 공식 데이터)를 공공데이터포털의 공식 API로 내려받아 적재합니다. "
+                     "한글명·영문명, 성별·연령 제한, 주상병 사용 여부가 함께 들어옵니다. 연 1회 갱신되며, 이용 조건은 ‘출처 표시’입니다.").classes("kcm-note")
+            with ui.column().classes("gap-1").style("font-size:12px"):
+                ui.html("<b>처음 한 번만 필요한 준비</b> — 무료 인증키 발급")
+                ui.html("1) <a href='https://www.data.go.kr/data/15067467/fileData.do' target='_blank' rel='noopener' style='color:var(--color-accent)'>"
+                        "공공데이터포털 ‘상병마스터’ 페이지 ↗</a>에서 로그인 후 <b>활용신청</b> (자동 승인)<br>"
+                        "2) 마이페이지 → 개발계정 → <b>일반 인증키</b> 복사<br>"
+                        "3) 아래 칸에 붙여 넣고 <b>저장</b> (또는 서버 환경변수 <span class='mono'>DATA_GO_KR_KEY</span>에 설정)").classes("text-muted")
+            with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                key_in = ui.input(placeholder="공공데이터포털 일반 인증키 (Decoding 또는 Encoding 키)" if not env_key else "서버 환경변수의 키를 사용 중입니다",
+                                  password=True, password_toggle_button=True).props("dense outlined").classes("grow mono")
+                key_in.set_value("" if env_key else stored_key())
+
+                def save_key() -> None:
+                    store.put("global", "dataGoKey", (key_in.value or "").strip(), by=user()["id"])
+                    ui.notify("인증키를 저장했습니다.", type="positive")
+                if not env_key:
+                    ui.button("저장", on_click=save_key).props("no-caps outline")
+            with ui.row().classes("items-center gap-3"):
+                go_btn = ui.button("최신 상병마스터 불러오기", icon="cloud_download").props("no-caps unelevated color=primary")
+                prog_txt = ui.label("").classes("text-muted").style("font-size:12px")
+            prog = ui.linear_progress(value=0, show_value=False).classes("w-full")
+            prog.set_visibility(False)
+            sync_msg = ui.label("").style("font-size:13px")
+
+            async def run_sync() -> None:
+                key = env_key or (key_in.value or "").strip() or stored_key()
+                if not key:
+                    ui.notify("공공데이터포털 인증키를 먼저 입력하세요.", type="warning")
+                    return
+                go_btn.disable()
+                prog.set_visibility(True)
+                prog.set_value(0)
+                sync_msg.set_text("")
+                records: list[dict] = []
+                try:
+                    with httpx.Client(headers={"Accept": "application/json"}) as client:
+                        prog_txt.set_text("최신 데이터 위치를 확인하는 중…")
+                        path, title = await nrun.io_bound(kcd_sync.latest_path, client)
+                        page, total = 1, None
+                        while True:
+                            res = await nrun.io_bound(kcd_sync.fetch_page, client, path, key, page)
+                            data = res.get("data") or []
+                            total = res.get("totalCount") or res.get("matchCount") or total or 0
+                            records.extend(data)
+                            pages = max(1, -(-int(total) // kcd_sync.PER_PAGE)) if total else page
+                            prog.set_value(min(1.0, len(records) / total) if total else 0)
+                            prog_txt.set_text(f"{title} — {len(records):,} / {int(total):,}건 내려받는 중 ({page}/{pages}쪽)")
+                            if not data or len(records) >= int(total or 0):
+                                break
+                            page += 1
+                    prog_txt.set_text("변환하고 저장하는 중…")
+                    rows = await nrun.io_bound(kcd_sync.rows_from_records, records)
+                    if len(rows) < 1000:
+                        raise RuntimeError(f"내려받은 항목이 너무 적습니다({len(rows)}건). 데이터 형식이 바뀌었는지 확인이 필요합니다.")
+                    data = {"name": title, "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "by": user()["id"],
+                            "source": kcd_sync.SOURCE_NOTE, "rows": rows}
+                    await nrun.io_bound(store.put, "global", "kcdMaster", data, user()["id"])
+                    get_index(fresh=True)
+                    prog.set_value(1)
+                    prog_txt.set_text("")
+                    sync_msg.set_text(f"적재 완료 — {len(rows):,}건 ({title}). {kcd_sync.SOURCE_NOTE}")
+                    ui.notify(f"상병마스터 {len(rows):,}건을 적재했습니다.", type="positive")
+                    show_current()
+                except PermissionError as ex:
+                    sync_msg.set_text(f"불러오기 실패 — {ex}")
+                    prog_txt.set_text("")
+                except Exception as ex:  # noqa: BLE001
+                    sync_msg.set_text(f"불러오기 실패 — {ex}")
+                    prog_txt.set_text("")
+                finally:
+                    go_btn.enable()
+            go_btn.on_click(run_sync)
+            ui.label(kcd_sync.SOURCE_NOTE).classes("text-muted").style("font-size:11px")
+
+        # ── 파일 올리기
+        with ui.column().classes("kcm-card w-full gap-2"):
+            ui.label("파일로 올리기").classes("kicker")
+            ui.label("직접 받은 CSV(UTF-8/CP949) 또는 XLSX 파일을 올립니다. 공공데이터포털의 ‘상병마스터’ CSV(상병기호·한글명·영문명 …)도 그대로 읽습니다. "
+                     "첫 행에 머리글이 필요합니다.").classes("text-muted").style("font-size:12px")
+            status = ui.label("").style("font-size:13px")
+
+            async def on_upload(e) -> None:
+                try:
+                    f = getattr(e, "file", None)
+                    name = f.name if f else e.name
+                    raw = await f.read() if f else e.content.read()
+                    rows = _parse_kcd(name, raw)
+                    data = {"name": name, "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "by": user()["id"], "rows": rows}
+                    store.put("global", "kcdMaster", data, by=user()["id"])
+                    get_index(fresh=True)
+                    status.set_text(f"적재 완료 — {len(rows):,}건")
+                    ui.notify(f"KCD {len(rows):,}건을 적재했습니다.", type="positive")
+                    show_current()
+                except Exception as ex:  # noqa: BLE001
+                    status.set_text(f"적재 실패 — {ex}")
+                    ui.notify(str(ex), type="negative")
+
+            ui.upload(on_upload=on_upload, auto_upload=True, label="파일 선택").props("accept=.csv,.xlsx,.xlsm flat bordered").classes("w-full")
 
 
 PLACEHOLDERS: dict[str, str] = {}  # 모든 화면 구현 완료
