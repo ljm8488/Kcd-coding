@@ -128,6 +128,30 @@ body.body--dark .kcm-btn.primary{background:linear-gradient(#6a91b7,#4f7598);box
 .q-tree__node-header-content{color:var(--color-text)}
 .q-tab{font-family:var(--font-heading);font-weight:600}
 .q-tab--active{color:var(--color-accent)}
+/* ── 반응형: 큰 모니터는 넓게, 작은 화면은 메뉴를 서랍으로 ── */
+.kcm-menu-btn{display:none!important}
+.kcm-backdrop{display:none}
+@media (min-width:1700px){.kcm-shell,.kcm-header-in,.kcm-crumb-in{max-width:1840px}}
+@media (min-width:2300px){.kcm-shell,.kcm-header-in,.kcm-crumb-in{max-width:2200px}}
+@media (max-width:1199px){.kcm-card{padding:16px}.kcm-h1,.text-xl.font-bold{font-size:30px}.kcm-side{width:220px}}
+@media (max-width:900px){
+ .kcm-menu-btn{display:inline-flex!important}
+ .kcm-side{position:fixed;left:0;top:0;bottom:0;margin:0;height:calc(100vh / var(--z,1));border-radius:0;z-index:60;width:min(300px,86vw);
+  transform:translateX(-105%);transition:transform .2s}
+ .kcm-side.open{transform:none;box-shadow:var(--elev-1),8px 0 30px rgba(0,0,0,.35)}
+ .kcm-side.open + .kcm-backdrop{display:block;position:fixed;inset:0;z-index:55;background:rgba(20,24,28,.5)}
+ .kcm-main{padding:16px 12px}
+ .kcm-header-in,.kcm-crumb-in{padding-left:12px;padding-right:12px}
+ .kcm-card{padding:14px}
+}
+@media (max-width:759px){
+ .kcm-h1,.text-xl.font-bold{font-size:26px}
+ input,textarea,.q-field__native{font-size:16px!important}
+ .kcm-brand{font-size:18px}
+ .q-btn{min-height:40px}
+ .q-table th,.q-table td{padding:6px 8px}
+ .kcm-btnrow{flex-wrap:wrap!important}.kcm-btnrow>.grow{flex:1 1 100%!important}
+}
 """
 
 NAV = [("search", "검색 · 코드 생성", "search", "/search"),
@@ -221,6 +245,8 @@ def layout(active: str) -> None:
     dm = apply_theme()
     with ui.element("header").classes("kcm-header"):
         with ui.element("div").classes("kcm-header-in"):
+            ui.button(icon="menu").props("flat round dense").classes("kcm-menu-btn").style("color:var(--color-text)").on(
+                "click", js_handler="() => document.querySelector('.kcm-side').classList.toggle('open')")
             with ui.link(target="/search").style("text-decoration:none;display:flex;align-items:center;gap:8px"):
                 ui.label("K").classes("kcm-logo")
                 ui.label("심사 코딩마스터").classes("kcm-brand")
@@ -266,6 +292,8 @@ def layout(active: str) -> None:
                                                 ui.icon("tune").classes("text-base")
                                             ui.label("조건 설정").style("white-space:nowrap")
             account_panel(dm, u)
+        ui.element("div").classes("kcm-backdrop").on(
+            "click", js_handler="() => document.querySelector('.kcm-side').classList.remove('open')")
     main = ui.column().classes("kcm-main gap-3")
     main.move(shell)
     main.__enter__()

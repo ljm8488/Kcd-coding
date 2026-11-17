@@ -15,6 +15,32 @@ TYPES = ["골절", "탈구", "염좌", "악성신생물", "양성신생물", "�
          "협착", "폴립", "낭종", "종양", "마비", "통증", "기형", "천공", "파열"]
 _ANAT_SORTED = sorted(ANATOMY, key=len, reverse=True)
 
+# 진료과별 전용 용어 · 약어 (같은 약어도 진료과마다 뜻이 다름) + 우선 KCD 장 접두 — 원본 웹앱의 사전
+DEPT_LEX = {
+    "내과": {"pre": ["E", "K", "N", "D5", "D6", "I1"], "terms": [["NB", "신경모세포종"], ["DM", "2형 당뇨병"], ["HTN", "고혈압"], ["CKD", "만성 콩팥병"], ["LC", "간경화증"], ["IDA", "철결핍빈혈"], ["AGE", "급성 위장염"], ["UGIB", "위장관 출혈"], ["PUD", "소화성 궤양"], ["Hypothyroidism", "갑상선기능저하증"]]},
+    "순환기내과": {"pre": ["I"], "terms": [["AMI", "급성 심근경색"], ["UA", "불안정 협심증"], ["AF", "심방세동"], ["CHF", "심부전"], ["HCMP", "비대심근병증"], ["DCMP", "확장성 심근병증"], ["AS", "대동맥판 협착"], ["MR", "승모판 역류"], ["PSVT", "발작성 심실상성 빈맥"], ["SSS", "동기능부전증후군"]]},
+    "신경과": {"pre": ["G", "I6", "F0"], "terms": [["CVA", "뇌경색"], ["TIA", "일과성 허혈발작"], ["ICH", "뇌내출혈"], ["PD", "파킨슨병"], ["AD", "알츠하이머병"], ["MG", "중증 근무력증"], ["GBS", "길랭-바레 증후군"], ["MS", "다발경화증"], ["Sz", "뇌전증"]]},
+    "호흡기내과": {"pre": ["J", "A15", "C34"], "terms": [["COPD", "만성 폐쇄성 폐질환"], ["CAP", "폐렴"], ["BA", "천식"], ["TB", "폐결핵"], ["ILD", "간질성 폐질환"], ["PTX", "기흉"], ["URI", "급성 상기도감염"], ["OSA", "수면 무호흡"], ["NSCLC", "비소세포폐암"]]},
+    "정형외과": {"pre": ["M", "S", "T"], "terms": [["HNP", "추간판 탈출"], ["LBP", "허리통증"], ["OA", "골관절염"], ["RA", "류마티스 관절염"], ["ACL", "전방십자인대 파열"], ["RCT", "회전근개 파열"], ["CTS", "손목굴 증후군"], ["Fx", "골절"], ["FNF", "대퇴골 경부 골절"], ["DRF", "요골 원위부 골절"]]},
+    "외과": {"pre": ["K", "C", "S3"], "terms": [["NB", "신경모세포종"], ["AA", "급성 충수염"], ["APE", "충수염"], ["GC", "위암"], ["CRC", "대장암"], ["BC", "유방암"], ["IH", "서혜부 탈장"], ["GBS", "담석증"], ["Ileus", "장폐색"], ["Hemorrhoid", "치핵"]]},
+    "응급의학과": {"pre": ["S", "T", "R", "V", "W", "X"], "terms": [["TBI", "외상성 뇌손상"], ["LOC", "의식소실"], ["MVA", "교통사고"], ["Burn", "화상"], ["Syncope", "실신"], ["CPA", "심정지"], ["Poisoning", "중독"], ["SOB", "호흡곤란"], ["Lac", "열린 상처"]]},
+    "가정의학과": {"pre": ["J0", "E", "I10", "Z", "K2"], "terms": [["NB", "신생아"], ["URI", "급성 상기도감염"], ["HTN", "고혈압"], ["DL", "이상지질혈증"], ["DM", "2형 당뇨병"], ["AGE", "급성 위장염"], ["GERD", "위식도역류병"], ["Obesity", "비만"], ["Insomnia", "불면증"]]},
+}
+
+
+def dept_interpretations(query: str, cur_dept: str, code_for) -> list[dict]:
+    """같은 약어가 진료과마다 갖는 뜻 — 현재 진료과가 먼저"""
+    k = (query or "").strip().lower()
+    out = []
+    if not k:
+        return out
+    for d, lex in DEPT_LEX.items():
+        t = next((x for x in lex["terms"] if x[0].lower() == k), None)
+        if t:
+            out.append({"dept": d, "abbr": t[0], "ko": t[1], "code": code_for(t[1])})
+    out.sort(key=lambda r: r["dept"] != cur_dept)
+    return out
+
 
 def split_query(q: str) -> tuple[str, str]:
     a = next((x for x in _ANAT_SORTED if x in q), "")
@@ -62,7 +88,20 @@ def search_page() -> None:
     idx = get_index()
     fam = rules.Family(idx)
     names = {r.code.upper(): r.ko for r in idx.rows}
-    st = {"q": "", "sex": "", "age": None, "hits": [], "ai": None}
+    from .phase2 import load_cond
+    cond = load_cond()
+    st = {"q": "", "sex": "", "age": None, "hits": [], "ai": None, "cmp": [], "orig": "", "note": ""}
+    norm_name: dict[str, str] = {}
+    for r in idx.rows:
+        norm_name.setdefault(norm(r.ko), r.code)
+
+    def code_for(ko: str) -> str:
+        n = norm(ko)
+        if not n:
+            return ""
+        if n in norm_name:
+            return norm_name[n]
+        return next((r.code for r in idx.rows if n in norm(r.ko)), "")
 
     ui.add_css(".kcm-search .q-field__control{height:58px}.kcm-search input{font-size:17px}")
     st["view"] = "card"
@@ -72,7 +111,7 @@ def search_page() -> None:
             ui.label("질병명 · 진단명 · 의학용어 · 약어 · 코드").style("font-size:12px;color:var(--muted)")
             box = ui.input(placeholder="예: 위암 / gastric cancer / HTN / appendicitis / J18").props("outlined clearable autofocus") \
                 .classes("kcm-search w-full")
-            with ui.row().classes("w-full no-wrap gap-2 items-stretch"):
+            with ui.row().classes("w-full no-wrap gap-2 items-stretch kcm-btnrow"):
                 ui.button("코드 생성", on_click=lambda: do_search()).props("no-caps unelevated color=primary").classes("grow").style("min-height:40px;font-size:15px")
                 ui.button("AI", icon="auto_awesome", on_click=lambda: run_ai()).props("no-caps outline")
                 auto_btn = ui.button("자동 ON", icon="bolt").props("no-caps outline")
@@ -85,17 +124,44 @@ def search_page() -> None:
             with ui.row().classes("gap-2"):
                 for chip in ["위암", "고혈압", "폐렴", "Appendicitis", "관절염", "두통", "J18", "HTN"]:
                     ui.button(chip, on_click=lambda _, c=chip: set_query(c)).props("outline dense no-caps size=sm").style("padding:0 10px")
+            lex0 = DEPT_LEX.get(cond["dept"])
+            with ui.row().classes("items-center gap-2"):
+                ui.label((f"{cond['dept']} 전용 용어 {len(lex0['terms'])}개 · {'·'.join(lex0['pre'])} 코드 우선" if lex0
+                          else "전 진료과 공통 용어로 검색합니다.") + " (조건 설정에서 변경)").classes("text-muted").style("font-size:11px")
+                for abbr, ko in (lex0["terms"] if lex0 else []):
+                    ui.button(abbr, on_click=lambda _, a=abbr: set_query(a)).props("outline dense no-caps size=xs").style("padding:0 8px").tooltip(ko)
             with ui.row().classes("items-center gap-3"):
                 ui.label("환자 조건 검증").classes("text-muted").style("font-size:12px")
                 sex = ui.select({"": "성별 전체", "M": "남", "F": "여"}, value="").props("dense outlined").classes("w-32")
                 age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("w-32")
                 ui.label(f"입력하면 성별·연령에 맞지 않는 코드를 표시합니다 · KCD 상병 {len(idx):,}건").classes("text-muted").style("font-size:11px")
         info = ui.label("").classes("text-muted").style("font-size:12px")
-        with ui.tabs().classes("w-full").props("dense align=left") as tabs:
-            t_res = ui.tab("res", label="결과 · 코드")
-            t_ai = ui.tab("ai", label="✦ AI 의미 검색")
-            t_sim = ui.tab("sim", label="유사한 용어")
-            t_rel = ui.tab("rel", label="연관 질환 · 해부학적 부위")
+        ui.add_css(""".kcm-tabs .q-tabs__content{gap:8px;flex-wrap:wrap}
+.kcm-tabs .q-tab{border:1px solid var(--color-divider);border-radius:8px;min-height:40px;padding:0 14px;background:var(--surface);
+ color:var(--color-text);opacity:1}
+.kcm-tabs .q-tab:before{content:'\\22EE';color:var(--n600);margin-right:6px;font-size:14px}
+.kcm-tabs .q-tab--active{background:var(--a200);border-color:var(--color-accent);color:var(--a800);box-shadow:inset 0 0 0 1px var(--a300)}
+.kcm-tabs .q-tab__indicator{display:none}
+.kcm-tabs .q-tab__content{flex-direction:row;gap:8px}
+.kcm-tabs .q-tab .q-badge{background:var(--a300);color:var(--a900);font-weight:700;border-radius:999px}
+.kcm-tabs .q-tab .kcm-done{border:1px solid var(--color-accent);color:var(--color-accent);border-radius:4px;padding:0 6px;font-size:12px}""")
+        with ui.tabs().classes("w-full kcm-tabs").props("dense align=left no-caps inline-label").style("flex-wrap:wrap") as tabs:
+            with ui.tab("res", label="").props("no-caps"):
+                ui.label("결과 · 코드")
+                b_res = ui.badge("0").props("rounded")
+                b_res.set_visibility(False)
+            with ui.tab("ai", label="").props("no-caps"):
+                ui.label("✦ AI 의미 검색")
+                b_ai = ui.label("✓ 완료").classes("kcm-done")
+                b_ai.set_visibility(False)
+            with ui.tab("sim", label="").props("no-caps"):
+                ui.label("유사한 용어")
+                b_sim = ui.badge("0").props("rounded")
+            with ui.tab("dept", label="").props("no-caps"):
+                ui.label("진료과별 해석")
+                b_dept = ui.badge("0").props("rounded")
+            with ui.tab("rel", label="").props("no-caps"):
+                ui.label("연관 질환 · 해부학적 부위")
         with ui.tab_panels(tabs, value="res").classes("w-full").style("background:transparent"):
             with ui.tab_panel("res").classes("p-0"):
                 res_box = ui.column().classes("w-full gap-2")
@@ -103,8 +169,58 @@ def search_page() -> None:
                 ai_box = ui.column().classes("w-full gap-3 kcm-card")
             with ui.tab_panel("sim").classes("p-0"):
                 sim_box = ui.column().classes("w-full gap-2 kcm-card")
+            with ui.tab_panel("dept").classes("p-0"):
+                dept_box = ui.column().classes("w-full gap-2")
             with ui.tab_panel("rel").classes("p-0"):
                 rel_box = ui.column().classes("w-full gap-2 kcm-card")
+
+        def render_dept() -> None:
+            dept_box.clear()
+            cmp_ = st["cmp"]
+            n = len(cmp_)
+            b_dept.set_text(str(n))
+            b_dept.set_visibility(n > 0)
+            with dept_box:
+                if st["note"]:
+                    ui.label(st["note"]).style("font-size:12px;color:var(--a700)")
+                if not cmp_:
+                    with ui.column().classes("kcm-card w-full gap-1"):
+                        ui.label("진료과별로 다르게 해석되는 용어가 아닙니다").style("font-weight:600;font-size:15px")
+                        q0 = st["orig"] or st["q"]
+                        ui.label(f"‘{q0}’은(는) 진료과 전용 용어 목록에 없어 모든 진료과에서 같은 뜻으로 검색됩니다. "
+                                 "진료과마다 뜻이 다른 약어(예: MS, AF, PE)를 입력하면 여기에서 비교할 수 있습니다.").classes("text-muted").style("font-size:13px")
+                    return
+                with ui.column().classes("kcm-card w-full gap-0").style("padding:0;overflow:hidden"):
+                    with ui.row().classes("w-full items-center justify-between").style("padding:10px 16px;border-bottom:1px solid var(--color-divider)"):
+                        with ui.row().classes("items-center gap-2"):
+                            ui.html('<span class="kcm-tag">진료과 용어</span>')
+                            ui.label("같은 약어, 진료과별 해석").style("font-weight:600;font-size:14px")
+                        ui.label(f"진료과별 해석 {n}건").classes("text-muted").style("font-size:12px")
+                    if not any(r["dept"] == cond["dept"] for r in cmp_):
+                        ui.label(f"현재 진료과({cond['dept']})에는 이 약어의 전용 해석이 없습니다. 아래에서 적용할 해석을 고르세요.") \
+                            .classes("text-muted").style("font-size:12px;padding:8px 16px;border-bottom:1px solid var(--color-divider)")
+                    grid = "display:grid;grid-template-columns:minmax(90px,150px) minmax(0,1fr) 90px 100px;gap:12px;align-items:center;padding:{p} 16px;border-bottom:1px solid var(--color-divider)"
+                    with ui.element("div").classes("w-full text-muted").style(grid.format(p="7px") + ";font-size:12px"):
+                        for h in ("진료과", "해석", "코드", ""):
+                            ui.label(h)
+                    for r in cmp_:
+                        cur = r["dept"] == cond["dept"]
+                        with ui.element("div").classes("w-full").style(
+                                grid.format(p="11px") + (";background:var(--a100);box-shadow:inset 3px 0 0 var(--color-accent)" if cur else "")):
+                            ui.label(r["dept"]).style("font-size:14px;" + ("font-weight:700" if cur else ""))
+                            with ui.column().classes("gap-0"):
+                                ui.label(r["ko"]).style("font-size:15px;" + ("font-weight:700" if cur else ""))
+                                ui.label(r["abbr"]).classes("text-muted mono").style("font-size:12px")
+                            ui.label(r["code"] or "—").classes("mono").style("font-weight:700;font-size:16px;color:var(--accent-hi)")
+                            ui.button("적용됨" if cur else "이 해석 적용", on_click=lambda _, r=r: apply_dept(r)).props(
+                                "dense no-caps size=sm " + ("unelevated color=primary" if cur else "outline")).style("white-space:nowrap")
+
+        def apply_dept(r: dict) -> None:
+            cond["dept"] = r["dept"]
+            u = user()
+            store.put(f"user:{u['id']}", "cond", cond, by=u["id"])
+            ui.notify(f"진료과를 {r['dept']}(으)로 바꿔 검색합니다.", type="positive")
+            ui.navigate.to("/search")
 
         def go_detail(code: str) -> None:
             ui.navigate.to(f"/detail?code={code}")
@@ -235,6 +351,8 @@ def search_page() -> None:
                     for k in [r.ko, *r.syn]:
                         if k and norm(k) != q and len(k) <= 24:
                             terms.setdefault(k, r.ko)
+            b_sim.set_text(str(min(len(terms), 40)))
+            b_sim.set_visibility(bool(terms))
             with sim_box:
                 if not terms:
                     ui.label("유사한 용어가 없습니다.").classes("text-muted text-sm")
@@ -277,6 +395,7 @@ def search_page() -> None:
         def render_ai() -> None:
             ai_box.clear()
             d = st["ai"]
+            b_ai.set_visibility(isinstance(d, dict))
             with ai_box:
                 if d is None:
                     ui.label("색인 검색으로 부족할 때 사용하세요. 제안 코드는 상병마스터로 검증합니다.").classes("text-sm text-muted")
@@ -350,13 +469,26 @@ def search_page() -> None:
 
         def do_search() -> None:
             q = (box.value or "").strip()
-            st["q"] = q
-            st["hits"] = idx.search(q)
+            q2, note = q, ""
+            lex = DEPT_LEX.get(cond["dept"])
+            if lex and q:   # 현재 진료과의 전용 약어면 그 뜻으로 검색
+                hit = next((t for t in lex["terms"] if t[0].lower() == q.lower()), None)
+                if hit:
+                    q2, note = hit[1], f"‘{q}’ → {hit[1]} ({cond['dept']} 해석으로 검색)"
+            st["q"], st["orig"], st["note"] = q2, q, note
+            hits = idx.search(q2)
+            if lex:         # 진료과 우선 코드 장을 앞으로 (안정 정렬)
+                hits.sort(key=lambda r: not any(r.code.upper().startswith(p) for p in lex["pre"]))
+            st["hits"] = hits
+            st["cmp"] = dept_interpretations(q, cond["dept"], code_for)
             st["ai"] = None
             n = len(st["hits"])
+            b_res.set_text(str(n))
+            b_res.set_visibility(n > 0)
             info.set_text((f"{n}건" + (" (최대 200건 표시)" if n >= 200 else "")) if q else "")
             render_results()
             render_similar()
+            render_dept()
             render_related()
             render_ai()
             if q and n == 0:
@@ -373,6 +505,7 @@ def search_page() -> None:
         age.on("update:model-value", revalidate, throttle=0.4)
         render_results()
         render_similar()
+        render_dept()
         render_related()
         render_ai()
 
