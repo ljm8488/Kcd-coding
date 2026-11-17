@@ -166,6 +166,69 @@ def nlp_page() -> None:
     from .phase4 import parse_age
 
     layout("nlp")
+    # ── 화면 캡처 · 붙여넣기 · 끌어다 놓기 · 캡처 자동 첨부 (브라우저에서 실행 → 업로드 요청으로 서버에 전달)
+    ui.add_body_html("""<script>(function(){
+var KEY='kcm_clip_auto',lastSig='',primed=false,busy=false,timer=null,state='',pasteAt=0,wired=false;
+function zone(){return document.querySelector('[data-kcm-url]');}
+function say(m,t){try{emitEvent('kcm_cap',{msg:m,type:t||'info'});}catch(e){}}
+function p2(n){return String(n).padStart(2,'0');}
+function stamp(){var d=new Date();return '캡처_'+d.getFullYear()+p2(d.getMonth()+1)+p2(d.getDate())+'_'+p2(d.getHours())+p2(d.getMinutes())+p2(d.getSeconds())+'.png';}
+function autoOn(){try{return localStorage.getItem(KEY)!=='0';}catch(e){return true;}}
+function setChip(){var c=document.getElementById('kcm-clip-chip');if(!c)return;var l,col;
+ if(!autoOn()){l='자동 첨부 꺼짐';col='var(--n500)';}
+ else if(state==='denied'){l='자동 첨부 차단됨 – 권한 필요';col='var(--warn)';}
+ else if(state==='need'){l='자동 첨부 대기 – 눌러서 권한 허용';col='var(--warn)';}
+ else if(state==='unsupported'){l='자동 첨부 미지원 – Ctrl+V 사용';col='var(--muted)';}
+ else{l='자동 첨부 켜짐';col='var(--ok)';}
+ c.querySelector('span').textContent=l;c.querySelector('i').style.background=col;}
+async function send(file){var z=zone();if(!z)return false;var fd=new FormData();fd.append('file',file,file.name);
+ try{var r=await fetch(z.dataset.kcmUrl,{method:'POST',body:fd});return r.ok;}catch(e){return false;}}
+async function pull(quiet){
+ if(!(navigator.clipboard&&navigator.clipboard.read)){state='unsupported';setChip();if(!quiet)say('이 브라우저는 자동 첨부를 지원하지 않습니다 — Ctrl+V로 붙여넣으세요.','warning');return false;}
+ try{var items=await navigator.clipboard.read();if(state){state='';setChip();}
+  for(var i=0;i<items.length;i++){var t=items[i].types.find(function(x){return /^image\\//.test(x);});
+   if(t){var blob=await items[i].getType(t);var sig=blob.size+':'+t;if(sig===lastSig)return false;
+    if(quiet&&!primed){primed=true;lastSig=sig;return false;}
+    if(quiet&&pasteAt&&Date.now()-pasteAt<4000){lastSig=sig;return false;}
+    lastSig=sig;var ok=await send(new File([blob],stamp(),{type:t}));if(ok)say('캡처 이미지를 첨부했습니다.','positive');return ok;}}
+  primed=true;
+ }catch(e){
+  if(quiet){var st='';try{var p=await navigator.permissions.query({name:'clipboard-read'});st=p.state;}catch(_){}
+   if(st==='denied'){state='denied';stop();}else if(e&&e.name==='NotAllowedError'&&st!=='granted'){state='need';}
+   setChip();return false;}
+  if(e&&e.name==='NotAllowedError')say('클립보드 접근이 막혀 있습니다 — Ctrl+V로 붙여넣으세요.','warning');}
+ return false;}
+function tick(){if(!zone()||document.hidden||!document.hasFocus()||busy)return;busy=true;pull(true).finally(function(){busy=false;});}
+function start(){if(timer||!autoOn())return;primed=false;timer=setInterval(tick,1200);tick();}
+function stop(){if(timer){clearInterval(timer);timer=null;}}
+window.kcmInit=function(){if(!wired){wired=true;
+  window.addEventListener('focus',function(){setTimeout(tick,300);});
+  document.addEventListener('paste',function(e){if(!zone())return;var its=(e.clipboardData&&e.clipboardData.items)||[];var fs=[];
+   for(var i=0;i<its.length;i++){if(its[i].kind==='file'){var f=its[i].getAsFile();if(f&&(/^image\\//.test(f.type)||f.type==='application/pdf'))fs.push(f);}}
+   if(!fs.length)return;e.preventDefault();pasteAt=Date.now();
+   fs.forEach(async function(f){var nm=(f.name&&f.name!=='image.png')?f.name:stamp();var ok=await send(new File([f],nm,{type:f.type}));if(ok)say('붙여넣은 파일을 첨부했습니다.','positive');});});
+  document.addEventListener('dragover',function(e){var z=e.target.closest&&e.target.closest('[data-kcm-url]');if(z){e.preventDefault();z.style.background='var(--a100)';}});
+  document.addEventListener('dragleave',function(e){var z=e.target.closest&&e.target.closest('[data-kcm-url]');if(z)z.style.background='';});
+  document.addEventListener('drop',function(e){var z=e.target.closest&&e.target.closest('[data-kcm-url]');if(!z)return;e.preventDefault();z.style.background='';
+   Array.prototype.forEach.call((e.dataTransfer&&e.dataTransfer.files)||[],async function(f){
+    if(!/\\.(pdf|jpe?g|png|txt)$/i.test(f.name)){say(f.name+' — 지원하지 않는 형식입니다.','warning');return;}
+    var ok=await send(f);if(ok)say(f.name+' 첨부했습니다.','positive');});});}
+ setChip();start();};
+window.kcmClipToggle=function(){
+ if(autoOn()&&state==='need'){primed=false;pull(true);return;}
+ if(autoOn()){try{localStorage.setItem(KEY,'0');}catch(e){}stop();state='';setChip();say('캡처 자동 첨부를 껐습니다.');}
+ else{try{localStorage.setItem(KEY,'1');}catch(e){}state='';setChip();start();say('캡처 자동 첨부를 켰습니다. Win + Shift + S 로 캡처하세요.');}};
+window.kcmSnip=function(){
+ if(!/Windows/i.test(navigator.userAgent)){say('Windows가 아닙니다. 캡처 후 Ctrl+V로 붙여넣으세요.','warning');return;}
+ var t0=Date.now(),a=document.createElement('a');a.href='ms-screenclip:';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();
+ var to,onFocus=function(){setTimeout(function(){pull(false).then(function(ok){if(ok||Date.now()-t0>60000)done();});},350);};
+ var done=function(){window.removeEventListener('focus',onFocus);clearTimeout(to);};
+ window.addEventListener('focus',onFocus);
+ to=setTimeout(function(){done();say('캡처가 감지되지 않았습니다. 캡처 후 Ctrl+V로 붙여넣으세요.','warning');},60000);
+ say('캡처 도구가 열립니다. 열리지 않으면 Win + Shift + S 를 누르세요.');};
+})();</script>""")
+    ui.on("kcm_cap", lambda e: ui.notify((e.args or {}).get("msg", ""), type=(e.args or {}).get("type", "info")))
+    ui.timer(0.6, lambda: ui.run_javascript("kcmInit()"), once=True)
     idx = get_index()
     fam = rules.Family(idx)
     names = {r.code.upper(): r.ko for r in idx.rows}
@@ -190,10 +253,20 @@ def nlp_page() -> None:
                     if i < 3:
                         ui.element("span").style("flex:1 1 24px;min-width:16px;height:1px;background:var(--color-divider)")
             with ui.row().classes("w-full gap-3 items-stretch").style("flex-wrap:wrap"):
-                with ui.column().style("flex:0 1 300px;min-width:250px;border:1px dashed var(--color-accent);border-radius:10px;padding:12px;justify-content:center"):
-                    up = ui.upload(on_upload=lambda e: on_upload(e), multiple=True, auto_upload=True, label="파일 선택 (여러 개 가능)") \
-                        .props("accept=.pdf,.jpg,.jpeg,.png,.txt flat bordered").classes("w-full")
-                    ui.label("PDF · JPG · PNG · TXT — 최대 10MB, 여러 개 동시 첨부").classes("text-muted").style("font-size:11px;text-align:center")
+                up = ui.upload(on_upload=lambda e: on_upload(e), multiple=True, auto_upload=True) \
+                    .props("accept=.pdf,.jpg,.jpeg,.png,.txt").style("position:absolute;width:0;height:0;overflow:hidden;opacity:0")
+                with ui.column().classes("kcm-dropzone items-center").props(f'data-kcm-url="{up._props.get("url", "")}"').style(
+                        "flex:0 1 320px;min-width:250px;border:1px dashed var(--color-accent);border-radius:10px;padding:14px;justify-content:center;gap:10px"):
+                    with ui.row().classes("items-center justify-center gap-2"):
+                        ui.button("파일 선택", on_click=lambda: up.run_method("pickFiles")).props("outline no-caps")
+                        ui.button("화면 캡처", icon="screenshot_monitor", on_click=lambda: ui.run_javascript("kcmSnip()")) \
+                            .props("unelevated color=primary no-caps").tooltip("Windows 캡처 도구 실행 (Win + Shift + S) — 캡처하면 자동 첨부")
+                    ui.label("또는 여기에 끌어다 놓기 · 캡처 붙여넣기 (Ctrl+V)").style("font-size:13px;text-align:center")
+                    ui.label("PDF · JPG · PNG · TXT — 여러 개 동시 첨부").classes("text-muted").style("font-size:11px;text-align:center")
+                    ui.html('<button id="kcm-clip-chip" type="button" onclick="kcmClipToggle()" title="Win + Shift + S 로 캡처하면 이 화면으로 돌아올 때 자동으로 첨부됩니다. 누르면 켜기/끄기." '
+                            'style="all:unset;cursor:pointer;display:inline-flex;gap:6px;align-items:center;font-size:12px;padding:3px 10px;border-radius:999px;'
+                            'border:1px solid var(--color-divider)"><i style="width:8px;height:8px;border-radius:50%;background:var(--n500)"></i>'
+                            '<span>자동 첨부 확인 중…</span></button>')
                 docs_box = ui.column().classes("gap-1").style(
                     "flex:1 1 360px;min-width:0;border:1px solid var(--color-divider);border-radius:10px;padding:12px;min-height:150px;max-height:300px;overflow:auto")
 

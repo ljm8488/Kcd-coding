@@ -131,8 +131,60 @@ def dash_page() -> None:
     status = collections.Counter(h.get("status", "") or "기타" for h in hist)
     week = sum(per_day.get(d, 0) for d in days[-7:])
 
-    with ui.column().classes("w-full max-w-6xl gap-3"):
+    ui.add_css("""
+.kcm-kpi{background:linear-gradient(160deg,var(--surface),var(--surface-2));border:1px solid var(--card-line);border-radius:14px;
+ box-shadow:0 1px 0 rgba(255,255,255,.7) inset,0 12px 28px -10px rgba(20,40,70,.28),0 3px 8px rgba(20,40,70,.10);
+ transition:transform .2s ease,box-shadow .2s ease}
+.kcm-kpi:hover{transform:translateY(-4px);box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 20px 38px -10px rgba(20,40,70,.36),0 5px 12px rgba(20,40,70,.14)}
+body.body--dark .kcm-kpi{box-shadow:0 1px 0 rgba(255,255,255,.07) inset,0 14px 30px -10px rgba(0,0,0,.7),0 3px 8px rgba(0,0,0,.35)}
+body.body--dark .kcm-kpi:hover{box-shadow:0 1px 0 rgba(255,255,255,.10) inset,0 22px 40px -10px rgba(0,0,0,.85),0 5px 12px rgba(0,0,0,.45)}
+.kcm-chartcard{background:linear-gradient(180deg,var(--surface),var(--surface-2));border-radius:16px;
+ box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 16px 34px -14px rgba(20,40,70,.30),0 3px 8px rgba(20,40,70,.08)}
+body.body--dark .kcm-chartcard{box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 18px 36px -14px rgba(0,0,0,.75),0 3px 8px rgba(0,0,0,.35)}
+.kcm-chartcard .ctitle{font-family:var(--font-heading);font-weight:600;font-size:18px;letter-spacing:.01em}
+""")
+    GRAD = lambda c1, c2: {"type": "linear", "x": 0, "y": 0, "x2": 0, "y2": 1, "colorStops": [{"offset": 0, "color": c1}, {"offset": 1, "color": c2}]}
+    AX = {"color": "#8794a0", "fontSize": 11}
+    SPLIT = {"lineStyle": {"color": "rgba(135,148,160,.22)", "type": "dashed"}}
+
+    # 세로 입체 막대 — 앞면 · 옆면 · 윗면을 다각형으로 그리고 그림자를 준다
+    CUBE_V = """(params, api) => {
+      const xv = api.value(0), yv = api.value(1);
+      const top = api.coord([xv, yv]), base = api.coord([xv, 0]);
+      const bw = api.size([1, 0])[0] * 0.46, d = Math.min(bw * 0.4, 14);
+      const l = top[0] - bw / 2, r = top[0] + bw / 2, t = top[1], b = base[1];
+      const txt = {type: 'text', style: {text: String(yv), x: top[0] + d / 2, y: (yv > 0 ? t - d : b) - 6, textAlign: 'center',
+        textVerticalAlign: 'bottom', fill: '#8794a0', font: '600 12px sans-serif'}};
+      if (yv <= 0) return txt;
+      return {type: 'group', children: [
+        {type: 'polygon', shape: {points: [[l, t], [r, t], [r, b], [l, b]]}, style: {fill: {type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [{offset: 0, color: '#8fb2d4'}, {offset: 1, color: '#4a7096'}]}, shadowBlur: 16, shadowColor: 'rgba(0,0,0,.45)',
+          shadowOffsetX: 6, shadowOffsetY: 8}},
+        {type: 'polygon', shape: {points: [[r, t], [r + d, t - d], [r + d, b - d], [r, b]]}, style: {fill: '#2f4a65'}},
+        {type: 'polygon', shape: {points: [[l, t], [l + d, t - d], [r + d, t - d], [r, t]]}, style: {fill: '#c4dcf0'}},
+        txt]};
+    }"""
+    # 가로 입체 막대
+    CUBE_H = """(params, api) => {
+      const yi = api.value(0), v = api.value(1);
+      const end = api.coord([v, yi]), base = api.coord([0, yi]);
+      const bh = api.size([0, 1])[1] * 0.5, d = Math.min(bh * 0.45, 9);
+      const l = base[0], r = end[0], t = end[1] - bh / 2, b = end[1] + bh / 2;
+      const txt = {type: 'text', style: {text: String(v), x: r + d + 6, y: end[1] - d / 2, textAlign: 'left', textVerticalAlign: 'middle',
+        fill: '#8794a0', font: '600 12px sans-serif'}};
+      if (r - l < 1) return txt;
+      return {type: 'group', children: [
+        {type: 'polygon', shape: {points: [[l, t], [r, t], [r, b], [l, b]]}, style: {fill: {type: 'linear', x: 0, y: 0, x2: 1, y2: 0,
+          colorStops: [{offset: 0, color: '#4a7096'}, {offset: 1, color: '#8fb2d4'}]}, shadowBlur: 14, shadowColor: 'rgba(0,0,0,.4)',
+          shadowOffsetX: 5, shadowOffsetY: 7}},
+        {type: 'polygon', shape: {points: [[r, t], [r + d, t - d], [r + d, b - d], [r, b]]}, style: {fill: '#2f4a65'}},
+        {type: 'polygon', shape: {points: [[l, t], [l + d, t - d], [r + d, t - d], [r, t]]}, style: {fill: '#c4dcf0'}},
+        txt]};
+    }"""
+
+    with ui.column().classes("w-full max-w-6xl gap-4"):
         ui.label("대시보드").classes("kcm-h1")
+
         def pct_of(h: dict) -> float | None:
             try:
                 return float(str(h.get("pct", "")).replace("%", ""))
@@ -142,40 +194,71 @@ def dash_page() -> None:
         avg = sum(pcts) / len(pcts) if pcts else 0.0
         month = sum(1 for h in hist if str(h.get("at", ""))[:7] == today.strftime("%Y-%m"))
         active = sum(1 for a_ in accounts if a_.get("active", True))
-        rings = [("이번 달 코딩", month, min(100, month), "이번 달 기록 건수"),
-                 ("평균 정확도", f"{avg:.1f}%", avg, "AI 제안·생성 기록 기준"),
-                 ("최근 7일", week, min(100, week * 5), "최근 7일 코딩 건수"),
-                 ("활성 사용자", active, (active / len(accounts) * 100) if accounts else 0, f"등록 {len(accounts)}명 중")]
-        with ui.element("div").classes("w-full").style("display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px"):
-            for label, shown, ratio, sub in rings:
-                with ui.column().classes("kcm-card items-center gap-1").style("padding:14px"):
+        rings = [("이번 달 코딩", month, min(100, month), "이번 달 기록 건수", ("#a9c6e3", "#4a7096")),
+                 ("평균 정확도", f"{avg:.1f}%", avg, "AI 제안·생성 기록 기준", ("#9fe0c0", "#2f8f6a")),
+                 ("최근 7일", week, min(100, week * 5), "최근 7일 코딩 건수", ("#f3d38f", "#c98a2b")),
+                 ("활성 사용자", active, (active / len(accounts) * 100) if accounts else 0, f"등록 {len(accounts)}명 중", ("#c9b6f0", "#7a58c9"))]
+        with ui.element("div").classes("w-full").style("display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px"):
+            for label, shown, ratio, sub, (c1, c2) in rings:
+                with ui.column().classes("kcm-kpi items-center gap-1").style("padding:16px 14px"):
                     ui.echart({
-                        "series": [{"type": "pie", "radius": ["68%", "86%"], "silent": True, "label": {"show": False},
-                                    "data": [{"value": ratio, "itemStyle": {"color": "#6a91b7"}},
-                                             {"value": max(0, 100 - ratio), "itemStyle": {"color": "rgba(135,148,160,.25)"}}]}],
+                        "animationDuration": 1100, "animationEasing": "cubicOut",
+                        "series": [
+                            # 바닥 홈(트랙) — 안쪽 그림자로 파인 느낌
+                            {"type": "pie", "radius": ["66%", "88%"], "silent": True, "label": {"show": False}, "animation": False,
+                             "data": [{"value": 1, "itemStyle": {"color": "rgba(135,148,160,.22)", "shadowBlur": 10, "shadowColor": "rgba(0,0,0,.35)",
+                                                                  "shadowOffsetY": 3}}]},
+                            # 진행 링 — 그라데이션 + 빛 번짐
+                            {"type": "pie", "radius": ["66%", "88%"], "silent": True, "label": {"show": False}, "startAngle": 90, "clockwise": True,
+                             "itemStyle": {"borderRadius": 8},
+                             "data": [{"value": max(ratio, 0.0001), "itemStyle": {"color": GRAD(c1, c2), "shadowBlur": 22, "shadowColor": c2,
+                                                                                    "shadowOffsetY": 4}},
+                                      {"value": max(0, 100 - ratio), "itemStyle": {"color": "transparent"}}]}],
                         "graphic": [{"type": "text", "left": "center", "top": "center",
-                                     "style": {"text": str(shown), "fill": "#8794a0", "fontSize": 22, "fontWeight": 600}}],
-                    }).style("height:110px;width:110px")
-                    ui.label(label).style("font-family:var(--font-heading);font-weight:600;font-size:16px")
+                                     "style": {"text": str(shown), "fill": "#8794a0", "fontSize": 24, "fontWeight": 700,
+                                               "shadowBlur": 6, "shadowColor": "rgba(0,0,0,.35)", "shadowOffsetY": 2}}],
+                    }).style("height:124px;width:124px")
+                    ui.label(label).style("font-family:var(--font-heading);font-weight:600;font-size:17px")
                     ui.label(sub).classes("text-muted").style("font-size:11px")
-        with ui.row().classes("w-full gap-3 no-wrap items-stretch"):
-            with ui.column().classes("kcm-card grow").style("min-width:0"):
-                ui.label("최근 14일 코딩 건수").classes("font-semibold")
+
+        with ui.row().classes("w-full gap-4 items-stretch").style("flex-wrap:wrap"):
+            with ui.column().classes("kcm-chartcard grow gap-1").style("min-width:min(100%,380px);flex:1 1 480px;padding:18px"):
+                ui.label("최근 14일 코딩 건수").classes("ctitle")
                 ui.echart({
-                    "grid": {"left": 36, "right": 12, "top": 16, "bottom": 28},
-                    "xAxis": {"type": "category", "data": [d[5:] for d in days]},
-                    "yAxis": {"type": "value", "minInterval": 1},
-                    "series": [{"type": "bar", "data": [per_day.get(d, 0) for d in days], "itemStyle": {"color": "#6a91b7"}}],
-                }).classes("w-full").style("height:240px")
-            with ui.column().classes("kcm-card grow").style("min-width:0"):
-                ui.label("많이 쓰인 코드 TOP 10").classes("font-semibold")
+                    "animationDuration": 900, "animationEasing": "cubicOut",
+                    "grid": {"left": 34, "right": 22, "top": 26, "bottom": 28},
+                    "xAxis": {"type": "category", "data": [d[5:] for d in days], "axisLine": {"show": False}, "axisTick": {"show": False}, "axisLabel": AX},
+                    "yAxis": {"type": "value", "minInterval": 1, "axisLabel": AX, "splitLine": SPLIT},
+                    "series": [{"type": "custom", ":renderItem": CUBE_V, "encode": {"x": 0, "y": 1},
+                                "data": [[i, per_day.get(d, 0)] for i, d in enumerate(days)]}],
+                }).classes("w-full").style("height:280px")
+            with ui.column().classes("kcm-chartcard grow gap-1").style("min-width:min(100%,380px);flex:1 1 480px;padding:18px"):
+                ui.label("많이 쓰인 코드 TOP 10").classes("ctitle")
                 ui.echart({
-                    "grid": {"left": 70, "right": 16, "top": 8, "bottom": 20},
-                    "xAxis": {"type": "value", "minInterval": 1},
-                    "yAxis": {"type": "category", "inverse": True, "data": [c for c, _ in top]},
-                    "series": [{"type": "bar", "data": [n for _, n in top], "itemStyle": {"color": "#8fb2d4"}}],
-                }).classes("w-full").style("height:240px")
-        with ui.column().classes("kcm-card w-full gap-1"):
-            ui.label("상태별 건수").classes("font-semibold")
-            ui.label("  ·  ".join(f"{k} {v:,}건" for k, v in status.most_common()) or "데이터 없음").classes("text-sm text-muted")
+                    "animationDuration": 900, "animationEasing": "cubicOut",
+                    "grid": {"left": 64, "right": 40, "top": 14, "bottom": 22},
+                    "xAxis": {"type": "value", "minInterval": 1, "axisLabel": AX, "splitLine": SPLIT},
+                    "yAxis": {"type": "category", "inverse": True, "data": [c for c, _ in top], "axisLine": {"show": False},
+                              "axisTick": {"show": False}, "axisLabel": {**AX, "fontFamily": "monospace", "fontWeight": 600}},
+                    "series": [{"type": "custom", ":renderItem": CUBE_H, "encode": {"x": 1, "y": 0},
+                                "data": [[i, n] for i, (_, n) in enumerate(top)]}],
+                }).classes("w-full").style("height:280px")
+
+        with ui.column().classes("kcm-chartcard w-full gap-1").style("padding:18px"):
+            ui.label("상태별 건수").classes("ctitle")
+            palette = [("#a9c6e3", "#4a7096"), ("#9fe0c0", "#2f8f6a"), ("#f3d38f", "#c98a2b"), ("#c9b6f0", "#7a58c9"), ("#f5a8a8", "#c24d4d")]
+            data = [{"name": k, "value": v, "itemStyle": {"color": GRAD(*palette[i % len(palette)]), "shadowBlur": 16,
+                                                           "shadowColor": palette[i % len(palette)][1], "shadowOffsetY": 5}}
+                    for i, (k, v) in enumerate(status.most_common(5))]
+            if data:
+                ui.echart({
+                    "animationDuration": 1000, "animationEasing": "cubicOut",
+                    "tooltip": {"trigger": "item", "formatter": "{b}: {c}건 ({d}%)"},
+                    "legend": {"orient": "vertical", "right": 10, "top": "middle", "textStyle": {"color": "#8794a0"}},
+                    "series": [{"type": "pie", "radius": ["42%", "72%"], "center": ["36%", "50%"], "roseType": "radius",
+                                "itemStyle": {"borderRadius": 8, "borderColor": "rgba(0,0,0,0)", "borderWidth": 2},
+                                "label": {"color": "#8794a0", "formatter": "{b}\n{c}건"}, "data": data}],
+                }).classes("w-full").style("height:260px")
+            else:
+                ui.label("데이터 없음").classes("text-sm text-muted")
             ui.label("이력은 사용자(PC)별로 저장된 기록을 모두 합산한 값입니다.").classes("text-xs text-muted")
