@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from html import escape as esc
 
 from nicegui import app, run, ui
@@ -154,6 +155,65 @@ def search_page() -> None:
 .kcm-chips .lab{font-size:11px;color:var(--muted)}
 .kcm-chips .push{margin-left:auto}
 @media (max-width:560px){.kcm-aibtn .q-btn__content span.block{display:none}}""")
+    ui.add_css("""
+.kcm-fig a[data-lb]{cursor:zoom-in}
+.kcm-lb{position:fixed;inset:0;z-index:7000;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:rgba(8,12,18,.66);backdrop-filter:blur(3px);animation:kcmLbIn .15s ease}
+@keyframes kcmLbIn{from{opacity:0}to{opacity:1}}
+.kcm-lb-box{display:flex;flex-direction:column;width:min(1000px,96vw);max-height:94vh;background:var(--surface);color:var(--color-text);
+  border:1px solid var(--color-divider);border-radius:16px;box-shadow:0 30px 80px -20px rgba(0,0,0,.7);overflow:hidden}
+.kcm-lb-h{display:flex;align-items:center;gap:12px;padding:10px 12px 10px 16px;border-bottom:1px solid var(--color-divider);background:var(--surface-2)}
+.kcm-lb-t{flex:1;min-width:0;font-family:var(--font-heading);font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kcm-lb-src{font-size:12px;color:var(--color-accent);text-decoration:none;white-space:nowrap}
+.kcm-lb-x,.kcm-lb-p,.kcm-lb-n{border:1px solid var(--color-divider);background:var(--surface);color:var(--color-text);border-radius:999px;cursor:pointer;line-height:1}
+.kcm-lb-x{width:32px;height:32px;font-size:15px}
+.kcm-lb-b{position:relative;display:flex;align-items:center;gap:8px;padding:10px;min-height:200px;flex:1;min-height:0}
+.kcm-lb-p,.kcm-lb-n{flex:none;width:40px;height:40px;font-size:24px}
+.kcm-lb-p:disabled,.kcm-lb-n:disabled{opacity:.25;cursor:default}
+.kcm-lb-w{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;max-height:74vh;overflow:auto;background:#fff;border-radius:10px;position:relative;min-height:200px}
+.kcm-lb-w img{max-width:100%;max-height:72vh;object-fit:contain;display:block;cursor:zoom-in}
+.kcm-lb-w.zoom{align-items:flex-start;justify-content:flex-start}
+.kcm-lb-w.zoom img{max-width:none;max-height:none;width:200%;cursor:zoom-out}
+.kcm-lb-spin{position:absolute;width:28px;height:28px;border:3px solid #cfd8e3;border-top-color:var(--color-accent);border-radius:50%;animation:kcmSpin .8s linear infinite}
+.kcm-lb-f{padding:8px 16px;font-size:12px;color:var(--muted);border-top:1px solid var(--color-divider)}
+@media (max-width:560px){.kcm-lb-p,.kcm-lb-n{width:32px;height:32px;font-size:20px}}
+""")
+    ui.add_body_html("""<script>
+(function(){
+  if(window.__kcmLB) return; window.__kcmLB=1;
+  var ov=null, list=[], k=0;
+  function q(s){return ov.querySelector(s)}
+  function build(){
+    ov=document.createElement('div'); ov.className='kcm-lb';
+    ov.innerHTML='<div class="kcm-lb-box" role="dialog" aria-modal="true"><div class="kcm-lb-h"><span class="kcm-lb-t"></span>'
+      +'<a class="kcm-lb-src" target="_blank" rel="noopener">원본 페이지 ↗</a><button class="kcm-lb-x" aria-label="닫기">✕</button></div>'
+      +'<div class="kcm-lb-b"><button class="kcm-lb-p" aria-label="이전">‹</button><div class="kcm-lb-w"><div class="kcm-lb-spin"></div><img alt=""></div>'
+      +'<button class="kcm-lb-n" aria-label="다음">›</button></div><div class="kcm-lb-f"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
+    q('.kcm-lb-x').onclick=close; q('.kcm-lb-p').onclick=function(){show(k-1)}; q('.kcm-lb-n').onclick=function(){show(k+1)};
+    q('.kcm-lb-w img').onclick=function(){ q('.kcm-lb-w').classList.toggle('zoom') };
+  }
+  function show(i){
+    if(i<0||i>=list.length) return; k=i; var a=list[i], im=q('.kcm-lb-w img'), w=q('.kcm-lb-w');
+    w.classList.remove('zoom'); q('.kcm-lb-spin').style.display='block'; im.style.opacity='.25';
+    im.onload=function(){ q('.kcm-lb-spin').style.display='none'; im.style.opacity='1' };
+    im.onerror=function(){ var s=im.dataset.fb||''; if(s===''&&a.dataset.lbf){ im.dataset.fb='1'; im.src=a.dataset.lbf; return } if(s!=='2'){ im.dataset.fb='2'; im.src=a.querySelector('img').src; return } q('.kcm-lb-spin').style.display='none'; im.style.opacity='1' };
+    im.dataset.fb=''; im.src=a.dataset.lb; im.alt=a.dataset.lbt||'';
+    q('.kcm-lb-t').textContent=a.dataset.lbt||''; q('.kcm-lb-src').href=a.href;
+    q('.kcm-lb-f').textContent=(i+1)+' / '+list.length+'  ·  출처: '+(a.dataset.lbs||'')+' — 참고용 이미지이며 라이선스는 원본 페이지에서 확인하세요.  (←/→ 이동 · 이미지 클릭: 확대/축소 · Esc 닫기)';
+    q('.kcm-lb-p').disabled=i===0; q('.kcm-lb-n').disabled=i===list.length-1;
+  }
+  function close(){ if(ov){ ov.remove(); ov=null; document.removeEventListener('keydown',key,true); } }
+  function key(e){ if(e.key==='Escape') close(); else if(e.key==='ArrowLeft') show(k-1); else if(e.key==='ArrowRight') show(k+1); }
+  document.addEventListener('click',function(e){
+    var a=e.target.closest&&e.target.closest('a[data-lb]'); if(!a) return;
+    e.preventDefault(); var box=a.closest('.kcm-imgs')||document;
+    list=[].slice.call(box.querySelectorAll('a[data-lb]')); if(ov) close(); build();
+    document.addEventListener('keydown',key,true); show(list.indexOf(a));
+  },true);
+})();
+</script>""")
     st["view"] = "card"
     st["limit"] = 12
     st["auto"] = True
@@ -624,7 +684,10 @@ def search_page() -> None:
             figs = []
             for x in items:
                 pct = f'<span class="kcm-cnt">{x["score"]}%</span> ' if scored else ""
-                figs.append(f'<figure class="kcm-fig"><a href="{esc(x["url"])}" target="_blank" rel="noopener">'
+                # 확대 팝업은 1024px 크기 (원본은 수십 MB일 수 있어 느림) — 위키미디어 썸네일 주소의 폭만 바꾼다
+                big = re.sub(r"/\d+px-", "/1024px-", x["img"], count=1) if "/thumb/" in x["img"] else (x.get("full") or x["img"])
+                figs.append(f'<figure class="kcm-fig"><a href="{esc(x["url"])}" target="_blank" rel="noopener" data-lb="{esc(big)}" '
+                            f'data-lbf="{esc(x.get("full") or "")}" data-lbt="{esc(x["title"])}" data-lbs="{esc(x["src"])}">'
                             f'<img src="{esc(x["img"])}" loading="lazy" referrerpolicy="no-referrer" alt="{esc(x["title"])}"></a>'
                             f'<figcaption>{pct}{esc(x["title"][:70])}<br><span class="src">{esc(x["src"])} ↗</span></figcaption></figure>')
             return '<div class="kcm-imgs">' + "".join(figs) + "</div>"
