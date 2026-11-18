@@ -496,22 +496,25 @@ def search_page() -> None:
                         ui.label(f"진료과별 해석 {n}건").classes("text-muted").style("font-size:12px")
                     if not any(r["dept"] == cond["dept"] for r in cmp_):
                         ui.label(f"현재 진료과({cond['dept']})에는 이 약어의 전용 해석이 없습니다. 아래에서 적용할 해석을 고르세요.") \
-                            .classes("text-muted").style("font-size:12px;padding:8px 16px;border-bottom:1px solid var(--color-divider)")
-                    grid = "display:grid;grid-template-columns:minmax(90px,150px) minmax(0,1fr) 90px 100px;gap:12px;align-items:center;padding:{p} 16px;border-bottom:1px solid var(--color-divider)"
-                    with ui.element("div").classes("w-full text-muted").style(grid.format(p="7px") + ";font-size:12px"):
-                        for h in ("진료과", "해석", "코드", ""):
-                            ui.label(h)
+                            .classes("text-muted").style("font-size:12px;padding:8px 16px;border-bottom:1px solid var(--color-divider);width:100%;box-sizing:border-box;line-height:1.5")
+                    # 패널이 좁아도 글자가 깨지지 않도록 항목마다 2줄 카드로 배치 (1줄: 진료과·코드·적용 버튼 / 2줄: 해석)
                     for r in cmp_:
                         cur = r["dept"] == cond["dept"]
                         with ui.element("div").classes("w-full").style(
-                                grid.format(p="11px") + (";background:var(--a100);box-shadow:inset 3px 0 0 var(--color-accent)" if cur else "")):
-                            ui.label(r["dept"]).style("font-size:14px;" + ("font-weight:700" if cur else ""))
-                            with ui.column().classes("gap-0"):
-                                ui.label(r["ko"]).style("font-size:15px;" + ("font-weight:700" if cur else ""))
+                                "display:flex;flex-direction:column;gap:6px;padding:12px 16px;border-bottom:1px solid var(--color-divider)"
+                                + (";background:var(--a100);box-shadow:inset 3px 0 0 var(--color-accent)" if cur else "")):
+                            with ui.element("div").style("display:flex;align-items:center;gap:10px;flex-wrap:wrap"):
+                                ui.label(r["dept"]).style("font-size:14px;font-weight:700;white-space:nowrap")
+                                ui.html('<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-weight:700;font-size:13px;'
+                                        'background:var(--a200);border:1px solid var(--a300);color:var(--a900);font-family:ui-monospace,Menlo,monospace">'
+                                        f'{esc(r["code"] or "코드 없음")}</span>')
+                                ui.element("span").style("flex:1 1 0")
+                                ui.button("적용됨" if cur else "이 해석 적용", on_click=lambda _, r=r: apply_dept(r)).props(
+                                    "dense no-caps size=sm " + ("unelevated color=primary" if cur else "outline")).style("white-space:nowrap")
+                            ui.label(r["ko"]).style("font-size:15px;line-height:1.45;word-break:keep-all;overflow-wrap:anywhere" + (";font-weight:700" if cur else ""))
+                            if r.get("abbr"):
                                 ui.label(r["abbr"]).classes("text-muted mono").style("font-size:12px")
-                            ui.label(r["code"] or "—").classes("mono").style("font-weight:700;font-size:16px;color:var(--accent-hi)")
-                            ui.button("적용됨" if cur else "이 해석 적용", on_click=lambda _, r=r: apply_dept(r)).props(
-                                "dense no-caps size=sm " + ("unelevated color=primary" if cur else "outline")).style("white-space:nowrap")
+
 
         def apply_dept(r: dict) -> None:
             cond["dept"] = r["dept"]

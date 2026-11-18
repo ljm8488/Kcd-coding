@@ -57,8 +57,7 @@ THEME_CSS = """
 --warn:#b85c14;--ok:#2f7d4f;--bad:#c9302c;
 --font-heading:'Barlow Condensed','Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif;
 --font-body:'Barlow','Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif;
---bg:var(--color-bg);--text:var(--color-text);--accent:var(--color-accent);--divider:var(--color-divider);
---muted:rgba(29,31,32,.55);--accent-hi:var(--a700);--accent-bg:var(--a100);--surface2:var(--surface-2)}
+--muted:rgba(29,31,32,.55);--accent-hi:var(--a700);--accent-bg:var(--a100)}
 body.body--dark{
 --color-bg:#14181c;--color-text:#e3e7eb;--color-accent:#6a91b7;--color-divider:rgba(255,255,255,.11);
 --surface:#1a1f24;--surface-2:#20262c;
@@ -66,6 +65,8 @@ body.body--dark{
 --a100:#1f2a35;--a200:#253546;--a300:#2e4862;--a400:#3b5a79;--a600:#6a91b7;--a700:#8fb2d4;--a800:#a9c6e3;--a900:#d6e6f5;
 --elev-1:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.25);--card-line:#2c343c;
 --warn:#e0a458;--ok:#7bc48a;--bad:#e57373;--muted:#8794a0;--accent-hi:#a9c6e3;--accent-bg:#253546}
+/* 별칭은 라이트·다크 각각의 값을 따라가도록 body 에서 계산한다 (:root 에서 계산하면 다크모드에서도 라이트 값이 상속된다) */
+body{--bg:var(--color-bg);--text:var(--color-text);--accent:var(--color-accent);--divider:var(--color-divider);--surface2:var(--surface-2)}
 body,.q-page,.nicegui-content{background:var(--color-bg)!important;color:var(--color-text)!important;
  font-family:var(--font-body);font-size:15px;line-height:1.55}
 body{--q-primary:var(--color-accent)}
@@ -941,8 +942,15 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)   # 화면 · 스크립트
 # 화면은 웹소켓으로 서버와 계속 이야기한다. 아래 설정으로 일시적인 지연·절전·프록시 유휴 끊김에도 연결이 유지되게 한다.
 from nicegui import core  # noqa: E402
 
-core.sio.eio.ping_interval = 15   # 15초마다 연결 확인 신호 → 중간 프록시가 "놀고 있는 연결"로 보고 끊지 않게 함 (기본 25초)
-core.sio.eio.ping_timeout = 90    # 응답이 90초까지 늦어도 끊지 않음 — 브라우저 탭 절전·잠깐의 서버 정체 대비 (기본 20초)
+def _tune_ping() -> None:
+    # NiceGUI 는 서버가 시작될 때 reconnect_timeout 으로 이 값을 다시 계산해 덮어쓴다(60초 → 간격 48초 · 대기 24초).
+    # 그래서 시작이 끝난 뒤(on_startup)에 다시 지정해야 실제로 적용된다.
+    core.sio.eio.ping_interval = 12   # 12초마다 연결 확인 신호 → 중간 프록시·방화벽이 "놀고 있는 연결"로 보고 끊지 않게 함
+    core.sio.eio.ping_timeout = 90    # 응답이 90초까지 늦어도 끊지 않음 — 브라우저 탭 절전·잠깐의 서버 정체 대비
+
+
+_tune_ping()
+app.on_startup(_tune_ping)
 
 
 @app.get("/healthz")
