@@ -127,9 +127,28 @@ def search_page() -> None:
             return norm_name[n]
         return next((r.code for r in idx.rows if n in norm(r.ko)), "")
 
-    ui.add_css(""".kcm-search .q-field__control{height:44px}.kcm-search input{font-size:16px}
+    ui.add_css(""".kcm-search .q-field__control{height:54px}.kcm-search input{font-size:17px;font-weight:500}
 .kcm-sbar{display:flex;align-items:center;gap:8px;width:100%}.kcm-sbar .kcm-search{flex:1 1 auto;min-width:0}
-.kcm-sbar .q-btn{height:44px}
+.kcm-sbar .q-btn{height:54px}
+.kcm-hero{position:relative;overflow:hidden;padding:14px 18px 12px 22px!important;border:1px solid var(--a300);
+  background:linear-gradient(120deg,var(--a100) 0%,var(--surface) 62%);box-shadow:0 14px 34px -18px rgba(44,69,93,.55),0 2px 6px -2px rgba(44,69,93,.18)}
+.kcm-hero::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:linear-gradient(180deg,var(--color-accent),var(--a600))}
+.kcm-hero::after{content:"";position:absolute;right:-60px;top:-70px;width:220px;height:220px;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--color-accent) 16%,transparent),transparent 70%);pointer-events:none}
+.kcm-hero>*{position:relative;z-index:1}
+.kcm-eyebrow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);letter-spacing:.02em}
+.kcm-eyebrow b{font-family:var(--font-heading);font-size:13px;color:var(--a800);letter-spacing:0}
+.kcm-eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--color-accent) 25%,transparent)}
+.kcm-hero .kcm-search .q-field__control{border-radius:14px;background:var(--surface)!important;box-shadow:0 6px 18px -10px rgba(44,69,93,.6)}
+.kcm-hero .kcm-search .q-field__control:before{border-color:var(--a400)}
+.kcm-hero .kcm-search .q-field--focused .q-field__control{box-shadow:0 0 0 4px color-mix(in srgb,var(--color-accent) 22%,transparent),0 8px 22px -10px rgba(44,69,93,.7)}
+.kcm-hero .kcm-search .q-field--focused .q-field__control:after{border-width:2px;border-color:var(--color-accent)}
+.kcm-hero .kcm-search .q-icon{color:var(--color-accent)!important;font-size:26px}
+.q-btn.kcm-aibtn{border-radius:14px;padding:0 20px;font-weight:700;color:#fff!important;border:0;
+  background:linear-gradient(135deg,var(--color-accent),var(--a700))!important;box-shadow:0 8px 18px -8px var(--color-accent)}
+.q-btn.kcm-aibtn:hover{filter:brightness(1.08)}
+.q-btn.kcm-optbtn{border-radius:14px;width:54px;background:var(--surface)!important}
+.kcm-hero .kcm-chips .q-btn{border-radius:999px;background:var(--surface)!important}
 .kcm-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%}
 .kcm-chips .sep{width:1px;height:16px;background:var(--color-divider);margin:0 2px}
 .kcm-chips .lab{font-size:11px;color:var(--muted)}
@@ -139,16 +158,20 @@ def search_page() -> None:
     st["limit"] = 12
     st["auto"] = True
     with ui.column().classes("w-full max-w-5xl gap-3"):
-        with ui.column().classes("kcm-card w-full gap-2").style("padding:12px 14px"):
+        with ui.column().classes("kcm-card kcm-hero w-full gap-2"):
+            with ui.element("div").classes("kcm-eyebrow"):
+                ui.element("span").classes("dot")
+                ui.html("<b>무엇을 찾으세요?</b>")
+                ui.label(f"KCD 상병 {len(idx):,}건 · 한글 · 영문 · 약어 · 코드")
             # ── 1줄: 검색창 · AI · 옵션
             with ui.element("div").classes("kcm-sbar"):
                 box = ui.input(placeholder="질병명 · 진단명 · 의학용어 · 약어 · 코드  (예: 위암, HTN, appendicitis, J18)").props(
                     "outlined dense clearable autofocus").classes("kcm-search")
                 with box.add_slot("prepend"):
-                    ui.icon("search").style("color:var(--muted)")
-                ui.button("AI 해석", icon="auto_awesome", on_click=lambda: run_ai()).props("no-caps outline").classes("kcm-aibtn").tooltip(
+                    ui.icon("search")
+                ui.button("AI 해석", icon="auto_awesome", on_click=lambda: run_ai()).props("no-caps unelevated color=None").classes("kcm-aibtn").tooltip(
                     "색인에서 못 찾을 때 AI가 용어를 해석하고 코드를 제안합니다")
-                with ui.button(icon="tune").props("outline round dense").style("width:44px").tooltip("검색 옵션"):
+                with ui.button(icon="tune").props("outline round dense").classes("kcm-optbtn").tooltip("검색 옵션"):
                     with ui.menu():
                         with ui.column().classes("gap-1").style("padding:10px 14px;min-width:260px"):
                             ui.switch("실시간 검색", value=True, on_change=lambda e: st.__setitem__("auto", e.value)).tooltip(
