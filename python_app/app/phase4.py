@@ -7,7 +7,7 @@ from html import escape as esc
 
 from nicegui import app, run, ui
 
-from . import gemini, rules, store
+from . import dictionary, gemini, rules, store
 from .main import get_index, layout, require_login, save_ui_pref, user
 from .search import norm
 
@@ -127,39 +127,65 @@ def search_page() -> None:
             return norm_name[n]
         return next((r.code for r in idx.rows if n in norm(r.ko)), "")
 
-    ui.add_css(".kcm-search .q-field__control{height:58px}.kcm-search input{font-size:17px}")
+    ui.add_css(""".kcm-search .q-field__control{height:44px}.kcm-search input{font-size:16px}
+.kcm-sbar{display:flex;align-items:center;gap:8px;width:100%}.kcm-sbar .kcm-search{flex:1 1 auto;min-width:0}
+.kcm-sbar .q-btn{height:44px}
+.kcm-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%}
+.kcm-chips .sep{width:1px;height:16px;background:var(--color-divider);margin:0 2px}
+.kcm-chips .lab{font-size:11px;color:var(--muted)}
+.kcm-chips .push{margin-left:auto}
+@media (max-width:560px){.kcm-aibtn .q-btn__content span.block{display:none}}""")
     st["view"] = "card"
     st["limit"] = 12
     st["auto"] = True
     with ui.column().classes("w-full max-w-5xl gap-3"):
-        with ui.column().classes("kcm-card w-full gap-3"):
-            ui.label("질병명 · 진단명 · 의학용어 · 약어 · 코드").style("font-size:12px;color:var(--muted)")
-            box = ui.input(placeholder="예: 위암 / gastric cancer / HTN / appendicitis / J18").props("outlined clearable autofocus") \
-                .classes("kcm-search w-full")
-            with ui.row().classes("w-full no-wrap gap-2 items-stretch kcm-btnrow"):
-                ui.button("코드 생성", on_click=lambda: do_search()).props("no-caps unelevated color=primary").classes("grow").style("min-height:40px;font-size:15px")
-                ui.button("AI", icon="auto_awesome", on_click=lambda: run_ai()).props("no-caps outline")
-                auto_btn = ui.button("자동 ON", icon="bolt").props("no-caps outline")
-
-                def toggle_auto() -> None:
-                    st["auto"] = not st["auto"]
-                    auto_btn.set_text("자동 ON" if st["auto"] else "자동 OFF")
-                auto_btn.on_click(toggle_auto)
-                ui.button("초기화", on_click=lambda: reset_search()).props("no-caps outline")
-            with ui.row().classes("gap-2"):
+        with ui.column().classes("kcm-card w-full gap-2").style("padding:12px 14px"):
+            # ── 1줄: 검색창 · AI · 옵션
+            with ui.element("div").classes("kcm-sbar"):
+                box = ui.input(placeholder="질병명 · 진단명 · 의학용어 · 약어 · 코드  (예: 위암, HTN, appendicitis, J18)").props(
+                    "outlined dense clearable autofocus").classes("kcm-search")
+                with box.add_slot("prepend"):
+                    ui.icon("search").style("color:var(--muted)")
+                ui.button("AI 해석", icon="auto_awesome", on_click=lambda: run_ai()).props("no-caps outline").classes("kcm-aibtn").tooltip(
+                    "색인에서 못 찾을 때 AI가 용어를 해석하고 코드를 제안합니다")
+                with ui.button(icon="tune").props("outline round dense").style("width:44px").tooltip("검색 옵션"):
+                    with ui.menu():
+                        with ui.column().classes("gap-1").style("padding:10px 14px;min-width:260px"):
+                            ui.switch("실시간 검색", value=True, on_change=lambda e: st.__setitem__("auto", e.value)).tooltip(
+                                "켜면 입력하는 동안 바로 결과가 바뀝니다. 끄면 Enter로 검색합니다.")
+                            ui.label("끄면 Enter 또는 돋보기로만 검색").classes("text-muted").style("font-size:11px;margin-top:-6px")
+                            ui.separator()
+                            ui.button("검색어 지우기", icon="restart_alt", on_click=lambda: reset_search()).props("flat dense no-caps align=left").style("justify-content:flex-start")
+            # ── 2줄: 예시 · 진료과 용어 · 환자 조건 (한 줄에 모아 공간 절약)
+            lex0 = DEPT_LEX.get(cond["dept"])
+            with ui.element("div").classes("kcm-chips"):
+                ui.label("예시").classes("lab")
                 for chip in ["위암", "고혈압", "폐렴", "Appendicitis", "관절염", "두통", "J18", "HTN"]:
                     ui.button(chip, on_click=lambda _, c=chip: set_query(c)).props("outline dense no-caps size=sm").style("padding:0 10px")
-            lex0 = DEPT_LEX.get(cond["dept"])
-            with ui.row().classes("items-center gap-2"):
-                ui.label((f"{cond['dept']} 전용 용어 {len(lex0['terms'])}개 · {'·'.join(lex0['pre'])} 코드 우선" if lex0
-                          else "전 진료과 공통 용어로 검색합니다.") + " (조건 설정에서 변경)").classes("text-muted").style("font-size:11px")
-                for abbr, ko in (lex0["terms"] if lex0 else []):
-                    ui.button(abbr, on_click=lambda _, a=abbr: set_query(a)).props("outline dense no-caps size=xs").style("padding:0 8px").tooltip(ko)
-            with ui.row().classes("items-center gap-3"):
-                ui.label("환자 조건 검증").classes("text-muted").style("font-size:12px")
+                if lex0:
+                    ui.element("span").classes("sep")
+                    ui.label(f"{cond['dept']} 용어").classes("lab").tooltip(
+                        f"{len(lex0['terms'])}개 · {'·'.join(lex0['pre'])} 코드 우선 (조건 설정에서 변경)")
+                    for abbr, ko in lex0["terms"]:
+                        ui.button(abbr, on_click=lambda _, a=abbr: set_query(a)).props("outline dense no-caps size=xs").style("padding:0 8px").tooltip(ko)
+                cond_btn = ui.button("환자 조건 검증", icon="rule").props("flat dense no-caps size=sm").classes("push").tooltip(
+                    "필요할 때만 사용 — 성별·연령에 맞지 않는 코드를 표시합니다")
+            # ── 3줄: 환자 조건 (눌렀을 때만 펼침)
+            cond_row = ui.row().classes("items-center gap-3 w-full")
+            with cond_row:
                 sex = ui.select({"": "성별 전체", "M": "남", "F": "여"}, value="").props("dense outlined").classes("w-32")
                 age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("w-32")
-                ui.label(f"입력하면 성별·연령에 맞지 않는 코드를 표시합니다 · KCD 상병 {len(idx):,}건").classes("text-muted").style("font-size:11px")
+                ui.label(f"성별·연령에 맞지 않는 코드를 표시합니다 · KCD 상병 {len(idx):,}건").classes("text-muted").style("font-size:11px")
+            cond_row.set_visibility(False)
+
+            def toggle_cond() -> None:
+                on = not cond_row.visible
+                cond_row.set_visibility(on)
+                cond_btn.props("color=primary" if on else "color=grey-7")
+                if not on:                       # 닫으면 조건을 비워 검증을 끈다
+                    sex.set_value("")
+                    age.set_value(None)
+            cond_btn.on_click(toggle_cond)
         info = ui.label("").classes("text-muted").style("font-size:12px")
         ui.add_css(""".kcm-tbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-divider);border-radius:8px;min-height:40px;
  padding:0 14px;background:var(--surface);cursor:grab;user-select:none;font-family:var(--font-heading);font-weight:600;font-size:15px}
@@ -441,7 +467,7 @@ def search_page() -> None:
             hits = st["hits"]
             with res_box:
                 if not st["q"].strip():
-                    ui.label("검색어를 입력하고 ‘코드 생성’을 누르세요.").classes("text-muted text-sm")
+                    ui.label("위 검색창에 입력하면 결과가 바로 표시됩니다.").classes("text-muted text-sm")
                     return
                 if not hits:
                     ui.label("결과가 없습니다. ‘AI 의미 검색’ 탭에서 구어·약어도 해석해 볼 수 있습니다.").classes("text-muted text-sm")
@@ -721,6 +747,31 @@ def search_page() -> None:
                             if c.get("reason"):
                                 ui.tooltip(c["reason"])
                 ui.label("코드를 누르면 색인을 다시 검색합니다.").classes("text-xs text-muted")
+                # AI 해석이 맞다면 용어 사전에 저장 → 다음부터는 AI 없이 바로 찾는다
+                key = (st.get("orig") or st["q"] or "").strip()
+                good = [str(c.get("code", "")).strip().upper() for c in codes if str(c.get("code", "")).strip().upper() in names][:3]
+                alts = [a for a in [d.get("ko", "").strip()] if a and idx.search(a, 1)] + good
+                if key and alts:
+                    saved = key in dictionary.entries()
+
+                    with ui.row().classes("items-center gap-2"):
+                        b = ui.button("이 해석을 용어 사전에 저장", icon="library_add").props("outline dense no-caps size=sm")
+                        ui.label(f"‘{key}’ → {' · '.join(alts)}").classes("text-xs text-muted")
+
+                        def save_dict(b=b, key=key, alts=alts) -> None:
+                            try:
+                                dictionary.save_entry(key, alts, user()["id"], "AI 해석")
+                            except ValueError as ex:
+                                ui.notify(str(ex), type="warning")
+                                return
+                            ui.notify(f"‘{key}’을(를) 용어 사전에 저장했습니다. 다음부터 AI 없이 바로 찾습니다.", type="positive")
+                            b.disable()
+                            b.set_text("사전에 저장됨")
+                        if saved:
+                            b.disable()
+                            b.set_text("이미 사전에 있음")
+                        else:
+                            b.on_click(save_dict)
 
         async def run_ai() -> None:
             q = st["q"].strip()
@@ -744,13 +795,13 @@ def search_page() -> None:
         async def set_query(q: str) -> None:
             box.set_value(q)
             tabs.set_value("res")
-            await do_search()
+            await do_search(True)
 
         async def reset_search() -> None:
             box.set_value("")
             await do_search()
 
-        async def do_search() -> None:
+        async def do_search(now: bool = False) -> None:
             q = (box.value or "").strip()
             st["rid"] = rid = st.get("rid", 0) + 1     # 겹쳐 실행된 이전 검색이 나중에 끝나도 화면을 덮어쓰지 않게
             q2, note = q, ""
@@ -759,6 +810,8 @@ def search_page() -> None:
                 hit = next((t for t in lex["terms"] if t[0].lower() == q.lower()), None)
                 if hit:
                     q2, note = hit[1], f"‘{q}’ → {hit[1]} ({cond['dept']} 해석으로 검색)"
+            if not note and q:      # 구어·영문·약어를 공식 명칭으로 풀어 찾았다면 어떻게 풀었는지 알려 준다
+                note = idx.explain(q)
             st["q"], st["orig"], st["note"] = q2, q, note
             st["limit"] = 12
             st["ai"] = None
@@ -811,15 +864,31 @@ def search_page() -> None:
             status["rel"] = "done"
             render_ai()
             render_bar()
-            if n == 0:
-                ui.timer(0.05, run_ai, once=True)
+            if n == 0 or idx.is_relaxed(q2):
+                # 결과가 없거나 일부 단어만 맞으면 → 입력이 1.2초 멈춘 뒤에만 기록하고 AI가 해석한다
+                # (타이핑 도중의 미완성 단어마다 AI를 부르거나 기록하지 않게)
+                async def settle(q_=q) -> None:
+                    if st.get("orig") != q_ or st["rid"] != rid:
+                        return
+                    dictionary.log_missed(q_, user()["id"])     # 관리자가 용어 사전에 넣을 수 있게 기록
+                    await run_ai()
+                ui.timer(0.05 if now or not st["auto"] else 1.2, settle, once=True)
         def revalidate() -> None:
             st["sex"], st["age"] = sex.value or "", parse_age(age.value)
             render_results()
             render_ai()
 
-        box.on("keydown.enter", do_search)
-        box.on("update:model-value", lambda: do_search() if st["auto"] else None, throttle=0.5)
+        box.on("keydown.enter", lambda: do_search(True))
+        async def on_typing(e) -> None:
+            """글자를 칠 때마다 (잠깐 멈추면) 바로 검색 — 엔터 없이 실시간으로 결과가 바뀐다"""
+            if not st["auto"]:
+                return
+            st["typing"] = tid = st.get("typing", 0) + 1
+            await asyncio.sleep(0.18)
+            if st["typing"] != tid:           # 그 사이 더 쳤으면 마지막 글자 기준으로만 검색
+                return
+            await do_search()
+        box.on_value_change(on_typing)
         sex.on_value_change(lambda _: revalidate())
         age.on("update:model-value", revalidate, throttle=0.4)
         render_results()

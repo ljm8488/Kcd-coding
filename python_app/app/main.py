@@ -7,6 +7,7 @@ import io
 import json
 import os
 import random
+import re
 import time
 from pathlib import Path
 
@@ -167,16 +168,17 @@ NAV = [("search", "검색 · 코드 생성", "search", "/search"),
        ("favs", "개인 코드집", "star_outline", "/favs"),
        ("dash", "대시보드", "bar_chart", "/dash"),
        ("users", "사용자 관리", "group", "/users"),
-       ("kcd", "KCD 데이터", "storage", "/kcd")]
-NAV_ROLES = {"dash": ("sysadmin", "orgadmin"), "users": ("sysadmin", "orgadmin"), "kcd": ("sysadmin",)}
+       ("kcd", "KCD 데이터", "storage", "/kcd"),
+       ("dict", "용어 사전", "spellcheck", "/dict")]
+NAV_ROLES = {"dash": ("sysadmin", "orgadmin"), "users": ("sysadmin", "orgadmin"), "kcd": ("sysadmin",), "dict": ("sysadmin",)}
 TITLES = {k: t for k, t, _, _ in NAV}
 TITLES["password"] = "비밀번호 변경"
 NAV_INFO = {k: (icon, href) for k, _, icon, href in NAV}
-NAV_GROUPS = [("조회", ["search", "index", "nlp"]), ("내 작업", ["history", "favs"]), ("관리", ["dash", "users", "kcd"])]
+NAV_GROUPS = [("조회", ["search", "index", "nlp"]), ("내 작업", ["history", "favs"]), ("관리", ["dash", "users", "kcd", "dict"])]
 SCOPE_SHORT = {"sysadmin": "시스템 전체 관리", "orgadmin": "소속 기관 관리", "user": "시스템 사용"}
 
 
-UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols", "nav_groups", "nav_items")
+UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols", "nav_groups", "nav_items", "nav_collapsed")
 
 
 def load_ui_pref() -> None:
@@ -361,9 +363,15 @@ def layout(active: str) -> None:
                                     caret = ui.label("▾").style("font-size:10px;width:10px;color:var(--n600)")
                                     ui.label(title).classes("kicker").style("flex:1")
 
-                                def toggle(_=None, body=body, caret=caret) -> None:
+                                hidden_grp = title in (app.storage.user.get("nav_collapsed") or [])
+                                if hidden_grp:
+                                    body.set_visibility(False)
+                                    caret.set_text("▸")
+
+                                def toggle(_=None, body=body, caret=caret, title=title) -> None:
                                     body.set_visibility(not body.visible)
                                     caret.set_text("▾" if body.visible else "▸")
+                                    set_collapsed(title, not body.visible)
                                 head.on("click", toggle)
                                 body.move(head.parent_slot.parent)  # 머리글 아래에 본문 배치
                                 with body:
@@ -375,12 +383,28 @@ def layout(active: str) -> None:
                                                 with ui.element("span").classes("kcm-tile"):
                                                     ui.icon(icon).classes("text-lg")
                                                 ui.label(TITLES[key]).style("white-space:nowrap")
-                                        if key == "search":
+                                            if key == "search":      # 하위 메뉴(조건 설정) 접기·펴기 — 선택은 사용자별로 기억
+                                                sub_hidden = "sub:search" in (app.storage.user.get("nav_collapsed") or [])
+                                                ui.button(icon="chevron_right" if sub_hidden else "expand_more", color=None,
+                                                          on_click=lambda: toggle_sub("sub:search")).props("flat dense round size=sm").classes("kcm-subtoggle").style(
+                                                    "margin-left:auto").tooltip("하위 메뉴 펴기" if sub_hidden else "하위 메뉴 숨기기").on("click.stop.prevent", lambda: None)
+                                        if key == "search" and ("sub:search" not in (app.storage.user.get("nav_collapsed") or []) or active == "cond"):
                                             with ui.link(target="/cond").classes("kcm-item kcm-sub" + (" active" if active == "cond" else "")):
                                                 with ui.row().classes("items-center no-wrap gap-2"):
                                                     with ui.element("span").classes("kcm-tile").style("width:24px;height:24px;border-radius:6px"):
                                                         ui.icon("tune").classes("text-base")
                                                     ui.label("조건 설정").style("white-space:nowrap")
+
+                def set_collapsed(name: str, on: bool) -> None:
+                    cur = [x for x in (app.storage.user.get("nav_collapsed") or []) if x != name]
+                    if on:
+                        cur.append(name)
+                    app.storage.user["nav_collapsed"] = cur
+                    save_ui_pref(nav_collapsed=cur)
+
+                def toggle_sub(name: str) -> None:
+                    set_collapsed(name, name not in (app.storage.user.get("nav_collapsed") or []))
+                    render_nav()
 
                 def save_nav() -> None:
                     save_ui_pref(nav_groups=app.storage.user.get("nav_groups") or [], nav_items=app.storage.user.get("nav_items") or {})
@@ -494,7 +518,7 @@ def login_page() -> None:
     with ui.element("div").style("min-height:calc(100vh / var(--z, 1));width:100%;display:grid;place-items:center;padding:40px 20px"):
         with ui.column().classes("gap-0").style("width:min(420px,100%)"):
             ui.label("심사 코딩마스터").style("font-family:var(--font-heading);font-weight:600;font-size:38px;line-height:1.12;white-space:nowrap")
-            ui.label("소속기관을 선택하고 사번 또는 Gmail로 로그인하십시오.").classes("text-muted").style("font-size:13px;margin:6px 0 24px")
+            ui.label("사번 또는 Gmail을 입력하면 소속기관이 표시됩니다.").classes("text-muted").style("font-size:13px;margin:6px 0 24px")
             with ui.column().classes("kcm-card w-full gap-4").style("padding:22px"):
                 err = ui.label("").style("display:none;border:1px solid var(--color-accent);border-radius:10px;background:var(--a100);"
                                          "padding:10px 12px;font-size:13px;color:var(--a900)")
@@ -502,8 +526,9 @@ def login_page() -> None:
                     ui.label("⚠ SUPABASE_URL / SUPABASE_KEY 설정이 없어 계정을 불러올 수 없습니다.").style("color:var(--bad);font-size:13px")
                 with ui.column().classes("w-full gap-1"):
                     ui.label("소속기관").style("font-size:12px;color:var(--muted)")
-                    org_sel = ui.select(org_opts, value=state["org"]).props("dense outlined").classes("w-full")
-                    org_sel.bind_value(state, "org")
+                    # 기관 목록을 보여 주지 않는다 — 아이디를 입력하면 그 아이디가 속한 기관만 표시된다
+                    org_sel = ui.select({}, value=None).props("dense outlined readonly hide-dropdown-icon").classes("w-full")
+                    org_hint = ui.label("").style("font-size:11px;color:var(--muted)")
                 with ui.column().classes("w-full gap-1"):
                     ui.label("로그인 방식").style("font-size:12px;color:var(--muted)")
                     with ui.element("div").style("display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:100%"):
@@ -516,6 +541,45 @@ def login_page() -> None:
                             mode_btns[k] = b
                 lbl_id = ui.label("").style("font-size:12px;color:var(--muted);margin-bottom:-12px")
                 ident = ui.input().props("dense outlined").classes("w-full mono").bind_value(state, "id")
+                def refresh_org(*_: object) -> None:
+                    """아이디에 해당하는 소속기관만 보여 준다 (여러 기관에 같은 사번이 있으면 그 기관들만 고르게 한다)"""
+                    mode, ident_v = state["mode"], (state["id"] or "").strip().lower()
+                    if mode == "admin":
+                        org_sel.set_options({}, value=None)
+                        org_sel.props("readonly hide-dropdown-icon")
+                        state["org"] = next(iter(org_opts), "")
+                        org_hint.set_text("시스템 관리자는 소속기관 없이 로그인합니다.")
+                        return
+                    ids: list[str] = []
+                    if ident_v:
+                        for a in store.accounts():
+                            hit = str(a.get("empNo", "")).lower() == ident_v if mode == "emp" else str(a.get("id", "")).lower() == ident_v
+                            if hit and a.get("orgId") not in ids:
+                                ids.append(a.get("orgId"))
+                    names = {o["id"]: o["name"] for o in store.orgs()}
+                    opts = {i: names.get(i, i) for i in ids}
+                    if not ident_v:
+                        state["org"] = ""
+                        org_sel.set_options({}, value=None)
+                        org_hint.set_text("아이디를 입력하면 소속기관이 표시됩니다.")
+                        return
+                    if not opts:
+                        state["org"] = ""
+                        org_sel.set_options({}, value=None)
+                        org_hint.set_text("등록된 아이디가 아닙니다. 아이디를 다시 확인하세요.")
+                        return
+                    keep = state["org"] if state["org"] in opts else next(iter(opts))
+                    state["org"] = keep
+                    org_sel.set_options(opts, value=keep)
+                    if len(opts) > 1:
+                        org_sel.props(remove="readonly hide-dropdown-icon")
+                        org_hint.set_text("같은 사번이 여러 기관에 있습니다. 소속기관을 선택하세요.")
+                    else:
+                        org_sel.props("readonly hide-dropdown-icon")
+                        org_hint.set_text("")
+                org_sel.on_value_change(lambda e: state.__setitem__("org", e.value or ""))
+                ident.on_value_change(refresh_org)
+                refresh_org()
                 ui.label("비밀번호").style("font-size:12px;color:var(--muted);margin-bottom:-12px")
                 pw = ui.input(password=True, password_toggle_button=True, placeholder="비밀번호").props("dense outlined").classes("w-full").bind_value(state, "pw")
 
@@ -533,6 +597,7 @@ def login_page() -> None:
                         b.style("background:var(--a100);border-color:var(--color-accent);color:var(--a800);font-weight:600" if on
                                 else "background:var(--surface);border-color:var(--color-divider);color:var(--color-text);font-weight:400")
                     ident.set_value(typed.get(k) or saved_ids.get(k, ""))      # 이 방식에 저장된 아이디를 채운다
+                    refresh_org()
                     chk.set_value(bool(saved_ids.get(k)))
                     forget_btn.set_visibility(bool(saved_ids.get(k)))
                 for k, b in mode_btns.items():
@@ -558,8 +623,6 @@ def login_page() -> None:
                     saved_ids.update({k: str(v) for k, v in ids.items() if k in MODES and v})
                     if not saved_ids:
                         return
-                    if d.get("org") in org_opts:
-                        org_sel.set_value(d["org"])
                     last = d.get("mode") if d.get("mode") in MODES else next(iter(saved_ids))
                     typed.pop(last, None)
                     set_mode(last)
@@ -585,6 +648,11 @@ def login_page() -> None:
                     wait = login_wait(ip, ident_key)
                     if wait:
                         err.set_text(f"로그인 시도가 너무 많습니다. {wait}분 뒤에 다시 시도하세요.")
+                        err.style("display:block")
+                        return
+                    if state["mode"] != "admin" and not state["org"]:
+                        login_failed(ip, ident_key)
+                        err.set_text("등록된 아이디가 아닙니다. 사번 또는 Gmail을 다시 확인하세요." if state["id"].strip() else "아이디를 입력하세요.")
                         err.style("display:block")
                         return
                     u, msg = authenticate(state["mode"], state["id"], state["pw"], state["org"], accounts or [], all_orgs or [], sysad)
@@ -673,8 +741,8 @@ def _parse_kcd(name: str, raw: bytes) -> list[list]:
         if len(r) <= max(ci, ko):
             continue
         code, kname = norm_code(r[ci]), str(r[ko]).strip()
-        if not code or not kname or code in seen or not code[0].isalpha():
-            continue
+        if not code or not kname or code in seen or not code[0].isalpha() or not re.fullmatch(r"[A-Z]\d{2}(\.?[0-9A-Z]{1,3})?[*†]?", code):
+            continue          # 장·절 범위(A00-A09 등)나 설명 행은 코드가 아니므로 건너뜀
         seen.add(code)
         row = [code, kname, str(r[en]).strip() if 0 <= en < len(r) else "",
                "|".join(x.strip() for x in str(r[sy]).replace(";", ",").split(",") if x.strip()) if 0 <= sy < len(r) else ""]
@@ -806,6 +874,7 @@ def kcd_page() -> None:
             ui.label("직접 받은 CSV(UTF-8/CP949) 또는 XLSX 파일을 올립니다. 공공데이터포털의 ‘상병마스터’ CSV(상병기호·한글명·영문명 …)도 그대로 읽습니다. "
                      "첫 행에 머리글이 필요합니다.").classes("text-muted").style("font-size:12px")
             status = ui.label("").style("font-size:13px")
+            merge_en = ui.checkbox("기존 데이터는 그대로 두고 영문명만 보태기 (코드가 같은 행에 영문명을 채웁니다)", value=bool(m.get("rows"))).style("font-size:13px")
 
             async def on_upload(e) -> None:
                 try:
@@ -813,6 +882,27 @@ def kcd_page() -> None:
                     name = f.name if f else e.name
                     raw = await f.read() if f else e.content.read()
                     rows = _parse_kcd(name, raw)
+                    if merge_en.value and (store.kcd_master(fresh=True).get("rows") or []):
+                        cur = store.kcd_master(fresh=True)
+                        eng = {r[0].replace(".", "").upper(): r[2] for r in rows if len(r) > 2 and r[2]}
+                        if not eng:
+                            raise ValueError("이 파일에는 영문명 열이 없습니다. 머리글에 ‘영문명’(English)이 있는 파일을 올리세요.")
+                        n = 0
+                        for r in cur["rows"]:
+                            en = eng.get(r[0].replace(".", "").upper())
+                            if en:
+                                while len(r) < 3:
+                                    r.append("")
+                                if r[2] != en:
+                                    r[2] = en
+                                    n += 1
+                        cur.update({"at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "by": user()["id"]})
+                        store.put("global", "kcdMaster", cur, by=user()["id"])
+                        get_index(fresh=True)
+                        status.set_text(f"영문명 {n:,}건을 보탰습니다 (파일의 영문명 {len(eng):,}건 중)")
+                        ui.notify(f"영문명 {n:,}건을 적용했습니다.", type="positive")
+                        show_current()
+                        return
                     data = {"name": name, "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
                             "by": user()["id"], "rows": rows}
                     store.put("global", "kcdMaster", data, by=user()["id"])
@@ -907,7 +997,7 @@ def _warm() -> None:
 
 app.on_startup(_warm)
 
-from . import phase2, phase3, phase4, phase5, phase6  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드 / 4단계: 검색·정밀 분석)
+from . import phase2, phase3, phase4, phase5, phase6, phase7  # noqa: E402,F401  (2단계: 조건·색인·AI / 3단계: 이력·코드집·대시보드 / 4단계: 검색·정밀 분석)
 
 
 def run() -> None:
