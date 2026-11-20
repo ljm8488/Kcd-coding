@@ -239,12 +239,10 @@ if(!b)return;emitEvent('kcm_act',{act:b.dataset.kact,code:b.dataset.code});});</
     z0 = int(app.storage.user["zoom"])
     # 화면 폭에 맞춰 글자·화면을 자동 확대(--auto) + 사용자가 고른 크기(--user)를 곱한다
     ui.add_css(""":root{--auto:1}
-@media (min-width:1280px){:root{--auto:1.08}}
-@media (min-width:1500px){:root{--auto:1.18}}
-@media (min-width:1800px){:root{--auto:1.3}}
-@media (min-width:2200px){:root{--auto:1.5}}
-@media (min-width:2800px){:root{--auto:1.8}}
-@media (min-width:3400px){:root{--auto:2.1}}
+@media (min-width:1800px){:root{--auto:1.05}}
+@media (min-width:2200px){:root{--auto:1.2}}
+@media (min-width:2800px){:root{--auto:1.5}}
+@media (min-width:3400px){:root{--auto:1.8}}
 @media (max-width:759px){:root{--auto:1.05}}""")
     ui.add_css(f"body{{--user:{z0 / 100};--z:calc(var(--auto) * var(--user));zoom:calc(var(--auto) * var(--user))}}")
     return dm
