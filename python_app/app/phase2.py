@@ -271,8 +271,22 @@ window.kcmSnip=function(){
             .classes("text-muted").style("font-size:13px;margin-top:-8px")
 
         # ── 문서 첨부 · 판독
-        DOCS_LABEL = "문서 첨부 (선택) — 소견서 · 진단서 · 진료의뢰서를 파일·캡처·붙여넣기로 첨부해 판독"
-        with ui.expansion(DOCS_LABEL, icon="attach_file").classes("kcm-card w-full kcm-docs").props("dense") as docs_exp:
+        with ui.expansion().classes("kcm-card w-full kcm-docs").props("dense") as docs_exp:
+            def docs_head_html(n: int = 0) -> str:
+                tag = f"첨부 {n}개" if n else "선택"
+                return ('<div class="kcm-docs-head"><span class="kcm-docs-ic"><i class="q-icon material-icons">attach_file</i></span>'
+                        f'<span class="kcm-docs-tx"><b>문서 첨부 · 판독 <em>{tag}</em></b>'
+                        '<small>소견서 · 진단서 · 진료의뢰서를 파일 · 캡처 · 붙여넣기로 첨부하면 자동으로 읽어 줍니다</small></span>'
+                        '</div>')
+            with docs_exp.add_slot("header"):
+                with ui.row().classes("items-center w-full no-wrap gap-2"):
+                    docs_head = ui.html(docs_head_html()).classes("grow").style("min-width:0")
+                    # 펼치지 않고도 바로 첨부할 수 있는 두 버튼 (클릭이 펼침 동작으로 번지지 않게 .stop)
+                    ui.button("파일 선택", icon="folder_open", on_click=lambda: (docs_exp.set_value(True), up.run_method("pickFiles"))) \
+                        .props("unelevated no-caps color=primary").on("click.stop", lambda: None).style("flex:none")
+                    ui.button("화면 캡처", icon="screenshot_monitor", on_click=lambda: ui.run_javascript("kcmSnip()")) \
+                        .props("outline no-caps").on("click.stop", lambda: None).style("flex:none;background:var(--surface)") \
+                        .tooltip("Windows 캡처 도구 실행 (Win + Shift + S) — 캡처하면 자동 첨부")
             steps_row = ui.row().classes("items-center w-full no-wrap gap-2").style("font-size:12px")
 
             def render_steps() -> None:
@@ -369,8 +383,7 @@ window.kcmSnip=function(){
 
             def render_docs() -> None:
                 render_steps()
-                docs_exp._props["label"] = DOCS_LABEL + (f"  ·  첨부 {len(st['docs'])}개" if st["docs"] else "")
-                docs_exp.update()
+                docs_head.set_content(docs_head_html(len(st["docs"])))
                 docs_box.clear()
                 with docs_box:
                     if not st["docs"]:
@@ -492,7 +505,17 @@ window.kcmSnip=function(){
             ".kcm-more .q-item{min-height:30px;padding:0;font-size:12px;color:var(--color-accent)}"
             ".kcm-more .q-item__section--avatar{min-width:24px}"
             ".kcm-more .q-expansion-item__content{font-size:13px;line-height:1.6;opacity:.9;padding:2px 0 4px}"
-            ".kcm-docs{padding:0 14px}.kcm-docs .q-item{padding:10px 0;font-family:var(--font-heading);font-weight:600;font-size:15px}")
+            ".kcm-docs{padding:0 14px;border:1.5px solid var(--a300);border-left:5px solid var(--color-accent);background:var(--a100)}"
+            ".kcm-docs .q-item{padding:10px 0}"
+            ".kcm-docs-head{display:flex;align-items:center;gap:12px;width:100%;color:var(--color-text)}"
+            ".kcm-docs-ic{flex:none;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:var(--color-accent);color:#fff}"
+            ".kcm-docs-ic .q-icon{font-size:22px;color:#fff}"
+            ".kcm-docs-tx{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}"
+            ".kcm-docs-tx b{font-family:var(--font-heading);font-size:16px;font-weight:700}"
+            ".kcm-docs-tx em{font-style:normal;font-size:11px;font-weight:600;margin-left:8px;padding:2px 8px;border-radius:999px;"
+            "border:1px solid var(--color-accent);color:var(--color-accent);vertical-align:middle}"
+            ".kcm-docs-tx small{font-size:12.5px;color:var(--muted);line-height:1.4}"
+            ".kcm-docs .q-item__section--side{color:var(--color-accent)}")
         with ui.element("div").classes("kcm-split") as split_el:
             # ── ② AI 해석 결과 (KCD 코드 후보)
             with ui.column().classes("gap-2 w-full") as col_ai:
