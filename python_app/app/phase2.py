@@ -466,7 +466,7 @@ window.kcmSnip=function(){
         prog_card.set_visibility(False)
         # ── ① 의무기록 입력 (아래 작업 영역의 첫 칸으로 옮겨진다)
         with ui.column().classes("gap-2 w-full kcm-inputcol") as body_card:
-            ui.html('<div class="kcm-tbtn on" style="cursor:default;width:100%"><span class="kcm-step">1</span>의무기록 입력</div>').classes("w-full")
+            ui.html('<div class="kcm-tbtn on" style="cursor:default;width:100%"><span class="kcm-step">1</span>의무기록(소견서) 판독</div>').classes("w-full")
             with ui.column().classes("kcm-card gap-3 w-full"):
                 ui.label("입원사유 · 과거력 · 검사 · 치료경과 · 최종진단을 붙여 넣거나, 위 ‘문서 첨부’로 판독해 채웁니다.").classes("kcm-note1")
                 with ui.row().classes("items-center gap-2 w-full no-wrap"):
@@ -479,6 +479,8 @@ window.kcmSnip=function(){
                 with ui.row().classes("gap-2 w-full no-wrap"):
                     btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow")
                     ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline size=lg").style("white-space:nowrap;flex:none")
+                    ui.button(icon="print", on_click=lambda: print_result(), color=None).props("outline size=lg").style(
+                        "flex:none;color:var(--color-accent)").tooltip("판독 결과 인쇄 (본문 · AI 코드 후보 · 용어 해석 · 청구 목록)")
                 status = ui.label("").classes("text-muted").style("font-size:12px")
                 ui.label("한 번 누르면 ② 코드 후보와 ③ 용어 해석이 동시에 진행됩니다. 성별·연령은 아래 ④ 청구 코드 점검에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
         # ── 해석 결과 — AI 해석(코드 후보)과 의학용어·약어 해석을 두 탭으로 나눠 보여 주고, 실행하면 동시에 진행한다
@@ -833,6 +835,7 @@ window.kcmSnip=function(){
             codes = res.get("codes", [])
             min_acc = int(cond["minAcc"])
             shown = [c for c in codes if int(c.get("confidence", 0)) >= min_acc]
+            st["ai_last"] = {"codes": shown, "caution": res.get("caution", "")}      # 인쇄용으로 보관
             rt["ai"], rt["ai_n"] = "done", len(shown)
             render_rbar()
             status.set_text(f"후보 {len(shown)}건" + (f" (정확도 {min_acc}% 미만 {len(codes) - len(shown)}건 숨김)" if len(shown) != len(codes) else ""))
@@ -888,6 +891,50 @@ window.kcmSnip=function(){
                     ui.button("후보 모두 청구 목록에 담기", icon="playlist_add", on_click=add_all).props("no-caps outline")
                 if res.get("caution"):
                     ui.label("주의: " + res["caution"]).classes("text-sm text-muted")
+
+        def print_result() -> None:
+            """판독 결과 인쇄 — 본문 · AI 코드 후보 · 용어 해석 · 청구 목록을 A4 한 문서로 만들어 인쇄창을 연다"""
+            import json
+            import datetime as dt
+            e = html.escape
+            text = (box.value or "").strip()
+            if not text and not st["docs"]:
+                ui.notify("인쇄할 내용이 없습니다. 문서를 판독하거나 본문을 입력하세요.", type="warning")
+                return
+            s, a = current_ctx()
+            u_ = user()
+            parts = [f"<h1>의무기록(소견서) 판독 결과</h1>",
+                     f"<p class='meta'>출력 {dt.datetime.now():%Y-%m-%d %H:%M} · 작성자 {e(str(u_.get('name') or u_.get('id') or ''))} · "
+                     f"적용 조건 {e(cond['dept'])} / {e(cond['purpose'])} · 환자 {e({'M': '남', 'F': '여'}.get(s, '성별 미입력'))}"
+                     f"{f' · {a}세' if a is not None else ''}</p>"]
+            if st["docs"]:
+                parts.append("<p class='meta'>첨부 문서: " + e(", ".join(d["name"] for d in st["docs"])) + "</p>")
+            parts.append(f"<h2>판독 본문</h2><pre>{e(text) if text else '(본문 없음)'}</pre>")
+            ai = (st.get("ai_last") or {}).get("codes") or []
+            if ai:
+                rows = "".join(f"<tr><td class='c'>{e(str(c.get('code', '')))}</td><td>{e(names.get(str(c.get('code', '')).strip().upper()) or str(c.get('name_ko', '')))}</td>"
+                               f"<td class='c'>{e(str(c.get('confidence', '')))}%</td><td>{e(str(c.get('reason', '')))}</td></tr>" for c in ai)
+                parts.append("<h2>AI 코드 후보</h2><table><tr><th>코드</th><th>상병명</th><th>정확도</th><th>근거</th></tr>" + rows + "</table>")
+                if (st.get("ai_last") or {}).get("caution"):
+                    parts.append(f"<p class='meta'>주의: {e(st['ai_last']['caution'])}</p>")
+            if st["terms"]:
+                rows = "".join(f"<tr><td>{e(r['term'])}</td><td class='c'>{e(r['kind'])}</td><td>{e(r['meaning'])}{(' (' + e(r['english']) + ')') if r.get('english') else ''}</td></tr>" for r in st["terms"])
+                parts.append("<h2>의학용어 · 약어 해석</h2><table><tr><th>용어·약어</th><th>구분</th><th>해석</th></tr>" + rows + "</table>")
+            if st["claim"]:
+                rows = "".join(f"<tr><td class='c'>{e(r['code'])}</td><td>{e(names.get(r['code'], '코드집에 없음'))}</td><td class='c'>{e(r['kind'])}</td></tr>" for r in st["claim"])
+                parts.append("<h2>청구 코드 목록</h2><table><tr><th>코드</th><th>상병명</th><th>구분</th></tr>" + rows + "</table>")
+            parts.append("<p class='foot'>※ AI가 제안한 내용은 참고용이며 최종 코딩은 담당자의 확인이 필요합니다.</p>")
+            doc = ("<!doctype html><html><head><meta charset='utf-8'><title>의무기록 판독 결과</title><style>"
+                   "@page{size:A4;margin:16mm}body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#111;font-size:12px;line-height:1.55}"
+                   "h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:18px 0 6px;padding-bottom:3px;border-bottom:2px solid #333}"
+                   ".meta{color:#555;margin:2px 0}pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;border:1px solid #bbb;padding:10px;border-radius:4px}"
+                   "table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:4px 6px;vertical-align:top;text-align:left}th{background:#eee}"
+                   "td.c{text-align:center;white-space:nowrap}.foot{margin-top:18px;color:#666;font-size:11px}</style></head><body>" + "".join(parts) + "</body></html>")
+            # 보이지 않는 틀(iframe)에 문서를 쓰고 인쇄 — 팝업 차단에 걸리지 않는다
+            ui.run_javascript(
+                "(function(h){var f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';"
+                "document.body.appendChild(f);var d=f.contentWindow.document;d.open();d.write(h);d.close();"
+                "setTimeout(function(){f.contentWindow.focus();f.contentWindow.print();setTimeout(function(){f.remove()},60000)},300)})(" + json.dumps(doc) + ")")
 
         render_claim()
         render_terms()
