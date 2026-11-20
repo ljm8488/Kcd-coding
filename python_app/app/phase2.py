@@ -867,8 +867,9 @@ window.kcmSnip=function(){
                             ui.label(code).classes("font-bold mono").style("color:var(--accent-hi)")
                             with ui.row().classes("items-center gap-1 no-wrap").style("min-width:0"):
                                 ui.label(nm).style("font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap").tooltip(tip or nm)
-                                if c.get("primary"):
-                                    ui.html('<span class="kcm-chip" style="flex:none">주</span>')
+                                rl = c.get("role") or ("주진단" if c.get("primary") else "")
+                                if rl:
+                                    ui.html(f'<span class="kcm-chip {"" if rl == "주진단" else "off"}" style="flex:none">{ {"주진단": "주", "부진단": "부"}.get(rl, rl) }</span>').tooltip(rl)
                                 if not known or warn:
                                     ui.icon("warning", color="warning").classes("text-base").tooltip(tip)
                             ui.label(f"{c.get('confidence', 0)}%").classes("font-bold")
@@ -889,8 +890,9 @@ window.kcmSnip=function(){
                                     ui.label("⚠ " + m).classes("text-sm").style("color:var(--warn)")
                             with ui.column().classes("items-end gap-1"):
                                 ui.label(f"{c.get('confidence', 0)}%").classes("font-bold")
-                                if c.get("primary"):
-                                    ui.badge("주진단 후보")
+                                rl = c.get("role") or ("주진단" if c.get("primary") else "")
+                                if rl:
+                                    ui.badge("주진단 후보" if rl == "주진단" else rl).props("" if rl == "주진단" else "outline")
                                 actions(code, known or c.get("name_ko", ""), c.get("confidence", 0), False)
                 if caution:
                     ui.label("주의: " + caution).classes("text-sm text-muted")
@@ -916,8 +918,8 @@ window.kcmSnip=function(){
             ai = (st.get("ai_last") or {}).get("codes") or []
             if ai:
                 rows = "".join(f"<tr><td class='c'>{e(str(c.get('code', '')))}</td><td>{e(names.get(str(c.get('code', '')).strip().upper()) or str(c.get('name_ko', '')))}</td>"
-                               f"<td class='c'>{e(str(c.get('confidence', '')))}%</td><td>{e(str(c.get('reason', '')))}</td></tr>" for c in ai)
-                parts.append("<h2>AI 코드 후보</h2><table><tr><th>코드</th><th>상병명</th><th>정확도</th><th>근거</th></tr>" + rows + "</table>")
+                               f"<td class='c'>{e(str(c.get('role', '')))}</td><td class='c'>{e(str(c.get('confidence', '')))}%</td><td>{e(str(c.get('reason', '')))}</td></tr>" for c in ai)
+                parts.append("<h2>AI 코드 후보</h2><table><tr><th>코드</th><th>상병명</th><th>구분</th><th>정확도</th><th>근거</th></tr>" + rows + "</table>")
                 if (st.get("ai_last") or {}).get("caution"):
                     parts.append(f"<p class='meta'>주의: {e(st['ai_last']['caution'])}</p>")
             if st["terms"]:

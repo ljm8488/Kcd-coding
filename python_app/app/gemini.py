@@ -12,9 +12,12 @@ from . import store
 MODELS = [os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"), "gemini-flash-latest"]
 
 SYSTEM = (
-    "당신은 한국 병원 심사·코딩 전문가입니다. 의무기록 문장을 읽고 KCD(한국표준질병·사인분류) 상병코드 후보를 제안합니다. "
+    "당신은 한국 병원 심사·코딩 전문가입니다. 의무기록을 읽고 KCD(한국표준질병·사인분류) 상병코드 후보를 빠짐없이 제안합니다. "
     "코드는 반드시 KCD 형식(예: I10, E11.9)으로, 가능한 한 세분류까지 정확히 제시하세요. "
-    "확신이 낮으면 confidence를 낮추고, 근거(reason)는 한국어 한 문장으로 쓰세요. 의무기록에 없는 진단을 만들지 마세요."
+    "중요: 기록에 나온 모든 진단명·질환·병태·합병증·후유증·만성질환·출혈/빈혈 같은 소견·투석/수술 후 상태를 각각 별도 항목으로 내세요. "
+    "한 문장에 질환이 여러 개면 나눠서 각각 코드를 주고, 과거력(h/o)과 의심(R/O)도 포함하되 role 로 구분하세요. "
+    "role 은 '주진단'(입원 목적이 된 질환, 정확히 1개) · '부진단'(입원 중 관리·치료한 동반질환·합병증) · '과거력' · '의심'(R/O, 감별) 중 하나입니다. "
+    "최대 25개. 확신이 낮으면 confidence 를 낮추고, 근거(reason)는 한국어 한 문장으로 쓰세요. 의무기록에 없는 진단을 만들지 마세요."
 )
 
 SCHEMA = {
@@ -30,6 +33,7 @@ SCHEMA = {
                     "reason": {"type": "STRING"},
                     "confidence": {"type": "INTEGER"},
                     "primary": {"type": "BOOLEAN"},
+                    "role": {"type": "STRING"},
                 },
                 "required": ["code", "name_ko", "reason", "confidence"],
             },
@@ -275,7 +279,42 @@ def interpret_phrases(phrases: list[str], context: str = "") -> list[dict]:
     return json.loads(txt).get("terms", [])
 
 
+def _norm_code(c: str) -> str:
+    return str(c).strip().upper().replace(".", "")
+
+
+def suggest_more(text: str, found: list[dict], dept: str = "", purpose: str = "") -> list[dict]:
+    """2차 점검 — 1차에서 빠진 진단·병태만 골라 추가 코드로 제안한다 (이미 나온 코드는 제외)"""
+    have = "\n".join(f"- {c.get('code', '')} {c.get('name_ko', '')}" for c in found) or "(없음)"
+    sysmsg = (SYSTEM + " 지금은 보완 단계입니다. 이미 제안된 코드 목록을 줄 테니, 의무기록에 있으나 목록에 없는 진단·병태·합병증·소견·만성질환·과거력·"
+              "투석/수술 후 상태만 찾아 각각 새 항목으로 내세요. 이미 있는 코드는 다시 내지 마세요. 더 없으면 빈 배열을 주세요. role 은 '부진단' '과거력' '의심' 중에서 고르고 '주진단'은 쓰지 마세요.")
+    ctx = f"진료과: {dept or '전체'}\n코딩 목적: {purpose or '주진단'}\n\n이미 제안된 코드:\n{have}\n\n의무기록:\n{text.strip()}"
+    return json.loads(generate_race(sysmsg, [{"text": ctx}], 4096, schema=SCHEMA)).get("codes", [])
+
+
 def suggest(text: str, dept: str = "", purpose: str = "") -> dict:
-    """의무기록 → KCD 코드 후보. 경량 모델을 먼저 쓰고 느리면 다른 모델을 함께 띄워 먼저 끝나는 답을 쓴다(실측 2초 안팎)."""
+    """의무기록 → KCD 코드 후보. 경량 모델을 먼저 쓰고 느리면 다른 모델을 함께 띄워 먼저 끝나는 답을 쓴다.
+    1차로 주진단·주요 질환을 뽑고, 2차 점검에서 빠진 동반질환·합병증·과거력을 보태 누락을 줄인다."""
     ctx = f"진료과: {dept or '전체'}\n코딩 목적: {purpose or '주진단'}\n\n의무기록:\n{text.strip()}"
-    return json.loads(generate_race(SYSTEM, [{"text": ctx}], 4096, schema=SCHEMA))
+    res = json.loads(generate_race(SYSTEM, [{"text": ctx}], 4096, schema=SCHEMA))
+    codes = list(res.get("codes", []))
+    try:
+        have = {_norm_code(c.get("code", "")) for c in codes}
+        for c in suggest_more(text, codes, dept, purpose):
+            k = _norm_code(c.get("code", ""))
+            if k and k not in have and not any(k.startswith(h) or h.startswith(k) for h in have):   # 같은 계열(L89.9 / L89.90)의 중복은 뺀다
+                have.add(k)
+                c["primary"] = False
+                codes.append(c)
+    except Exception:  # noqa: BLE001
+        pass                                          # 보완 실패해도 1차 결과는 그대로 쓴다
+    # 주진단은 정확히 하나만 — role 이 '주진단'인 첫 항목, 없으면 primary 표시된 첫 항목
+    prim = next((c for c in codes if c.get("role") == "주진단"), None) or next((c for c in codes if c.get("primary")), None)
+    for c in codes:
+        c["primary"] = c is prim
+        if c["primary"]:
+            c["role"] = "주진단"
+        elif not c.get("role") or c.get("role") == "주진단":
+            c["role"] = "부진단"
+    res["codes"] = codes
+    return res
