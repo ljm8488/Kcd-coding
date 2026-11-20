@@ -474,13 +474,13 @@ window.kcmSnip=function(){
                     sex = ui.select({"": "성별 미입력", "M": "남", "F": "여"}, value="").props("dense outlined").classes("grow")
                     age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("grow")
                 box = ui.textarea(placeholder="예) 70세 남자, 기침·발열로 내원, 흉부 X-ray상 우하엽 폐렴, 고혈압 약 복용 중") \
-                    .props("outlined input-style='min-height:calc(100vh / var(--z, 1) - 575px);max-height:calc(100vh / var(--z, 1) - 575px);"
+                    .props("outlined input-style='min-height:210px;max-height:210px;"
                            "resize:none;font-size:15px;line-height:1.7'").classes("w-full")
                 with ui.row().classes("gap-2 w-full no-wrap"):
                     btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow")
                     ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline size=lg").style("white-space:nowrap;flex:none")
                 status = ui.label("").classes("text-muted").style("font-size:12px")
-                ui.label("한 번 누르면 ② 코드 후보와 ③ 용어 해석이 동시에 진행됩니다. 성별·연령은 아래 룰 점검에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
+                ui.label("한 번 누르면 ② 코드 후보와 ③ 용어 해석이 동시에 진행됩니다. 성별·연령은 아래 ④ 청구 코드 점검에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
         # ── 해석 결과 — AI 해석(코드 후보)과 의학용어·약어 해석을 두 탭으로 나눠 보여 주고, 실행하면 동시에 진행한다
         ui.add_css(""".kcm-tbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-divider);border-radius:8px;min-height:40px;
  padding:0 14px;background:var(--surface);cursor:pointer;user-select:none;font-family:var(--font-heading);font-weight:600;font-size:15px}
@@ -500,7 +500,7 @@ window.kcmSnip=function(){
             ".kcm-note1{font-size:13px;line-height:1.55;color:var(--color-text);opacity:.82}"
             ".kcm-step{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--color-accent);color:#fff;"
             "font-size:12px;font-weight:700;margin-right:2px}"
-            ".kcm-scroll{max-height:calc(100vh / var(--z, 1) - 300px);min-height:280px;overflow:auto;padding-right:4px}"
+            ".kcm-scroll{max-height:calc(100vh / var(--z, 1) - 420px);min-height:300px;overflow:auto;padding-right:4px}"
             ".kcm-empty{display:grid;justify-items:center;gap:6px;padding:34px 12px;text-align:center;color:var(--muted);font-size:13px;"
             "border:1px dashed var(--color-divider);border-radius:12px}"
             ".kcm-more .q-item{min-height:30px;padding:0;font-size:12px;color:var(--color-accent)}"
@@ -733,11 +733,14 @@ window.kcmSnip=function(){
         ocr_btn.on_click(run_ocr)
 
         # ── 청구 목록 · 룰 점검
-        with ui.column().classes("kcm-card w-full gap-2"):
-            ui.label("청구 코드 목록 · 룰 점검").classes("font-semibold")
-            ui.label("AI 후보의 ＋ 버튼으로 담거나 직접 입력하세요. 주진단은 1개여야 합니다.").classes("text-xs text-muted")
+        with ui.column().classes("w-full gap-2"):
+            ui.html('<div class="kcm-tbtn on" style="cursor:default;width:100%"><span class="kcm-step">4</span>청구 코드 점검 · 삭감 위험 확인</div>').classes("w-full")
+        with ui.column().classes("kcm-card w-full gap-2").style("margin-top:-6px"):
+            ui.html("② AI 후보의 <b>＋</b> 버튼으로 담거나 코드를 직접 입력해 <b>청구할 상병 목록</b>을 만든 뒤 <b>[점검 실행]</b>을 누르면, "
+                    "청구 전에 <b>삭감·조정 위험</b>을 미리 알려 드립니다. "
+                    "<span class='text-muted'>(주진단 1개 여부 · 성별/연령 불일치 · 불완전 코드 · 중복 · 증상코드 병기 · 배타 관계 등)</span>").style("font-size:13px;line-height:1.6")
             with ui.row().classes("items-center gap-2"):
-                new_code = ui.input(placeholder="코드 (예: J18.9)").props("dense outlined").classes("w-40")
+                new_code = ui.input(placeholder="코드 직접 추가 (예: J18.9)").props("dense outlined").classes("w-52")
 
                 def add_manual() -> None:
                     c = (new_code.value or "").strip().upper()
@@ -748,7 +751,7 @@ window.kcmSnip=function(){
                 ui.button("추가", on_click=add_manual).props("no-caps outline dense")
             claim_box = ui.column().classes("w-full gap-1")
             find_box = ui.column().classes("w-full gap-2")
-            ui.button("룰 점검 실행", icon="rule", on_click=lambda: run_rules()).props("no-caps")
+            ui.button("점검 실행", icon="rule", on_click=lambda: run_rules()).props("no-caps unelevated color=primary")
 
         def add_claim(code: str) -> None:
             if any(r["code"] == code for r in st["claim"]):
@@ -761,7 +764,7 @@ window.kcmSnip=function(){
             claim_box.clear()
             with claim_box:
                 if not st["claim"]:
-                    ui.label("목록이 비어 있습니다.").classes("text-sm text-muted")
+                    ui.html('<div class="kcm-empty" style="padding:14px 12px">아직 담은 코드가 없습니다. 위 ② AI 해석 결과의 <b>＋</b>를 누르거나 코드를 직접 입력하세요.</div>')
                 for r in st["claim"]:
                     with ui.row().classes("items-center no-wrap gap-3 w-full"):
                         ui.label(r["code"]).classes("font-bold").style("min-width:72px;color:var(--accent-hi)")
