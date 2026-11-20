@@ -898,14 +898,46 @@ window.kcmSnip=function(){
                     ui.label("주의: " + caution).classes("text-sm text-muted")
 
         def print_result() -> None:
-            """판독 결과 인쇄 — 본문 · AI 코드 후보 · 용어 해석을 A4 한 문서로 만들어 인쇄창을 연다"""
-            import json
-            import datetime as dt
-            e = html.escape
+            """인쇄 버튼 — 무엇을 인쇄할지 고르는 창을 연다 (① 원문 · ② 해석 문서 · ③ AI 코드 후보)"""
             text = pii.clean((box.value or "")).strip()
             if not text and not st["docs"]:
                 ui.notify("인쇄할 내용이 없습니다. 문서를 판독하거나 본문을 입력하세요.", type="warning")
                 return
+            last = app.storage.user.get("print_sel") or {}
+            has_ai = bool((st.get("ai_last") or {}).get("codes"))
+            with ui.dialog() as dlg, ui.card().style("min-width:340px;gap:6px"):
+                ui.label("무엇을 인쇄할까요?").style("font-family:var(--font-heading);font-weight:700;font-size:17px")
+                ui.label("인쇄할 칸을 고르세요. 고른 칸만 한 문서로 인쇄됩니다.").classes("text-muted").style("font-size:12px")
+                c1 = ui.checkbox("① 의무기록(소견서) 판독 — 원문", value=last.get("c1", True))
+                c2 = ui.checkbox("② 원문 해석 문서 — 한글 해석(→) 포함", value=last.get("c2", True))
+                c2b = ui.checkbox("용어 · 약어 표도 함께 인쇄", value=last.get("c2b", False)).style("margin-left:26px")
+                c2b.bind_enabled_from(c2, "value")
+                c3 = ui.checkbox("③ AI 해석 결과 · 코드 후보" + ("" if has_ai else "  (아직 결과 없음)"), value=last.get("c3", True) and has_ai)
+                c3.set_enabled(has_ai)
+                with ui.row().classes("w-full justify-between items-center").style("margin-top:8px"):
+                    with ui.row().classes("gap-1"):
+                        ui.button("전체", on_click=lambda: (c1.set_value(True), c2.set_value(True), c3.set_value(has_ai))).props("flat dense no-caps")
+                        ui.button("선택 해제", on_click=lambda: (c1.set_value(False), c2.set_value(False), c3.set_value(False))).props("flat dense no-caps")
+                    with ui.row().classes("gap-2"):
+                        ui.button("취소", on_click=dlg.close).props("flat no-caps")
+
+                        def go() -> None:
+                            sel = {"c1": c1.value, "c2": c2.value, "c2b": bool(c2b.value and c2.value), "c3": bool(c3.value and has_ai)}
+                            if not (sel["c1"] or sel["c2"] or sel["c3"]):
+                                ui.notify("인쇄할 칸을 하나 이상 고르세요.", type="warning")
+                                return
+                            app.storage.user["print_sel"] = sel
+                            dlg.close()
+                            do_print(sel)
+                        ui.button("인쇄", icon="print", on_click=go).props("unelevated color=primary no-caps")
+            dlg.open()
+
+        def do_print(sel: dict) -> None:
+            """고른 칸만 A4 한 문서로 만들어 인쇄창을 연다"""
+            import json
+            import datetime as dt
+            e = html.escape
+            text = pii.clean((box.value or "")).strip()
             s, a = current_ctx()
             u_ = user()
             parts = [f"<h1>의무기록(소견서) 판독 결과</h1>",
@@ -914,18 +946,22 @@ window.kcmSnip=function(){
                      f"{f' · {a}세' if a is not None else ''}</p>"]
             if st["docs"]:
                 parts.append("<p class='meta'>첨부 문서: " + e(", ".join(d["name"] for d in st["docs"])) + "</p>")
-            parts.append(f"<h2>판독 본문 (의학용어·약어 한글 해석 포함)</h2><pre>{terms.annotate_html(text, st['terms']) if text else '(본문 없음)'}</pre>")
+            if sel.get("c1"):
+                parts.append(f"<h2>① 의무기록(소견서) 판독 — 원문</h2><pre>{e(text) if text else '(본문 없음)'}</pre>")
+            if sel.get("c2"):
+                parts.append(f"<h2>② 원문 해석 문서 (의학용어·약어 한글 해석 포함)</h2><pre>{terms.annotate_html(text, st['terms']) if text else '(본문 없음)'}</pre>")
+                if sel.get("c2b") and st["terms"]:
+                    rows = "".join(f"<tr><td>{e(r['term'])}</td><td class='c'>{e(r['kind'])}</td><td>{e(r['meaning'])}{(' (' + e(r['english']) + ')') if r.get('english') else ''}</td></tr>" for r in st["terms"])
+                    parts.append("<h3>용어 · 약어 표</h3><table><tr><th>용어·약어</th><th>구분</th><th>해석</th></tr>" + rows + "</table>")
             ai = (st.get("ai_last") or {}).get("codes") or []
-            if ai:
+            if sel.get("c3") and ai:
                 rows = "".join(f"<tr><td class='c'>{e(str(c.get('code', '')))}</td><td>{e(names.get(str(c.get('code', '')).strip().upper()) or str(c.get('name_ko', '')))}</td>"
                                f"<td class='c'>{e(str(c.get('role', '')))}</td><td class='c'>{e(str(c.get('confidence', '')))}%</td><td>{e(str(c.get('reason', '')))}</td></tr>" for c in ai)
-                parts.append("<h2>AI 코드 후보</h2><table><tr><th>코드</th><th>상병명</th><th>구분</th><th>정확도</th><th>근거</th></tr>" + rows + "</table>")
+                parts.append("<h2>③ AI 해석 결과 · 코드 후보</h2><table><tr><th>코드</th><th>상병명</th><th>구분</th><th>정확도</th><th>근거</th></tr>" + rows + "</table>")
                 if (st.get("ai_last") or {}).get("caution"):
                     parts.append(f"<p class='meta'>주의: {e(st['ai_last']['caution'])}</p>")
-            if st["terms"]:
-                rows = "".join(f"<tr><td>{e(r['term'])}</td><td class='c'>{e(r['kind'])}</td><td>{e(r['meaning'])}{(' (' + e(r['english']) + ')') if r.get('english') else ''}</td></tr>" for r in st["terms"])
-                parts.append("<h2>의학용어 · 약어 해석</h2><table><tr><th>용어·약어</th><th>구분</th><th>해석</th></tr>" + rows + "</table>")
-            parts.append("<p class='foot'>※ AI가 제안한 내용은 참고용이며 최종 코딩은 담당자의 확인이 필요합니다.</p>")
+            if sel.get("c3"):
+                parts.append("<p class='foot'>※ AI가 제안한 내용은 참고용이며 최종 코딩은 담당자의 확인이 필요합니다.</p>")
             doc = ("<!doctype html><html><head><meta charset='utf-8'><title>의무기록 판독 결과</title><style>"
                    "@page{size:A4;margin:16mm}body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#111;font-size:12px;line-height:1.55}"
                    "h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:18px 0 6px;padding-bottom:3px;border-bottom:2px solid #333}"
@@ -933,7 +969,7 @@ window.kcmSnip=function(){
                    "table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:4px 6px;vertical-align:top;text-align:left}th{background:#eee}"
                    "td.c{text-align:center;white-space:nowrap}.foot{margin-top:18px;color:#666;font-size:11px}"
                    ".kcm-tm{border-bottom:1px dotted #333}.kcm-tm em{font-style:normal;font-weight:700;color:#0b5ea8;margin-left:3px}"
-                   ".kcm-tm em::before{content:'→ '}pre{line-height:1.9}</style></head><body>" + "".join(parts) + "</body></html>")
+                   ".kcm-tm em::before{content:'→ '}pre{line-height:1.9}h3{font-size:12.5px;margin:12px 0 4px}</style></head><body>" + "".join(parts) + "</body></html>")
             # 보이지 않는 틀(iframe)에 문서를 쓰고 인쇄 — 팝업 차단에 걸리지 않는다
             ui.run_javascript(
                 "(function(h){var f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';"
