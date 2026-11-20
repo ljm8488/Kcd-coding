@@ -226,7 +226,7 @@ def search_page() -> None:
             # ── 1줄: 검색창 · AI · 옵션
             with ui.element("div").classes("kcm-sbar"):
                 box = ui.input(placeholder="질병명 · 진단명 · 의학용어 · 약어 · 코드  (예: 위암, HTN, appendicitis, J18)").props(
-                    "outlined dense clearable autofocus").classes("kcm-search")
+                    "outlined dense clearable autofocus debounce=220").classes("kcm-search")   # 칠 때마다 보내지 않고 잠깐 멈출 때 한 번만 → 서버가 예전 글자를 되돌려 쓰는 현상 방지
                 with box.add_slot("prepend"):
                     ui.icon("search")
                 ui.button("AI 해석", icon="auto_awesome", on_click=lambda: run_ai()).props("no-caps unelevated color=None").classes("kcm-aibtn").tooltip(
@@ -967,13 +967,16 @@ def search_page() -> None:
             render_results()
             render_ai()
 
-        box.on("keydown.enter", lambda: do_search(True))
+        async def on_enter() -> None:
+            await asyncio.sleep(0.3)        # 입력창이 마지막 글자를 서버로 보낼 시간
+            await do_search(True)
+        box.on("keydown.enter", on_enter)
         async def on_typing(e) -> None:
             """글자를 칠 때마다 (잠깐 멈추면) 바로 검색 — 엔터 없이 실시간으로 결과가 바뀐다"""
             if not st["auto"]:
                 return
             st["typing"] = tid = st.get("typing", 0) + 1
-            await asyncio.sleep(0.18)
+            await asyncio.sleep(0.05)
             if st["typing"] != tid:           # 그 사이 더 쳤으면 마지막 글자 기준으로만 검색
                 return
             await do_search()
