@@ -10,7 +10,7 @@ import uuid
 from fastapi.responses import Response
 from nicegui import app, run, ui
 
-from . import gemini, store, terms
+from . import gemini, pii, store, terms
 from .main import get_index, layout, require_login, user
 from .search import norm
 
@@ -626,7 +626,7 @@ window.kcmSnip=function(){
             return st["terms"]
 
         async def interpret() -> None:
-            text = (box.value or "").strip()
+            text = pii.clean((box.value or "")).strip()
             if len(text) < 3:
                 ui.notify("해석할 본문이 없습니다.", type="warning")
                 return
@@ -670,6 +670,7 @@ window.kcmSnip=function(){
             for d in st["docs"]:
                 d.pop("pct", None)
             total, texts, chars = len(sel), [], 0
+            pii_total: dict = {}
             t_all = time.time()
             prog_card.set_visibility(True)
             prog_title.set_text(f"판독 중 · 0 / {total}개")
@@ -708,7 +709,9 @@ window.kcmSnip=function(){
                         if ocr_cancel["v"]:
                             raise RuntimeError("사용자가 판독을 중단했습니다.")
                         await asyncio.sleep(0.3)
-                    t = fut.result()
+                    t, pc = pii.mask(fut.result())          # 주민번호·전화번호·성명·주소 등 개인정보는 본문에 넣기 전에 가린다
+                    for k_, n_ in pc.items():
+                        pii_total[k_] = pii_total.get(k_, 0) + n_
                     d["state"] = f"완료 · {len(t)}자"
                     texts.append(f"[{d['name']}]\n{t}")
                     chars += len(t)
@@ -735,6 +738,8 @@ window.kcmSnip=function(){
                 prog_detail.set_text("본문에 추가했습니다. 이어서 의학용어·약어를 해석합니다.")
                 box.set_value(((box.value or "").rstrip() + "\n\n" if (box.value or "").strip() else "") + "\n\n".join(texts))
                 ui.notify("판독 결과를 본문에 추가했습니다. 의학용어·약어를 해석합니다.", type="positive")
+                if pii.summary(pii_total):
+                    ui.notify(f"개인정보를 가렸습니다 — {pii.summary(pii_total)}", type="info", icon="visibility_off", timeout=7000)
                 show_rtab("terms")
                 await interpret()
                 prog_detail.set_text("본문에 추가했고, 의학용어·약어 해석도 끝났습니다.")
@@ -749,7 +754,7 @@ window.kcmSnip=function(){
         def current_ctx() -> tuple[str, int | None]:
             return sex.value or "", parse_age(age.value)
         async def analyze() -> None:
-            text = (box.value or "").strip()
+            text = pii.clean((box.value or "")).strip()
             if len(text) < 5:
                 ui.notify("의무기록 내용을 입력하세요.", type="warning")
                 return
@@ -804,7 +809,7 @@ window.kcmSnip=function(){
 
                             def save_hist(code=code, known=known, c=c) -> None:
                                 from .phase3 import add_history
-                                add_history((box.value or "")[:60], code, known or c.get("name_ko", ""), f"{c.get('confidence', 0)}%", "AI 제안")
+                                add_history(pii.clean(box.value or "")[:60], code, known or c.get("name_ko", ""), f"{c.get('confidence', 0)}%", "AI 제안")
                                 ui.notify("이력에 기록했습니다.", type="positive")
 
                             with ui.row().classes("gap-1"):
@@ -819,7 +824,7 @@ window.kcmSnip=function(){
             import json
             import datetime as dt
             e = html.escape
-            text = (box.value or "").strip()
+            text = pii.clean((box.value or "")).strip()
             if not text and not st["docs"]:
                 ui.notify("인쇄할 내용이 없습니다. 문서를 판독하거나 본문을 입력하세요.", type="warning")
                 return
@@ -859,7 +864,12 @@ window.kcmSnip=function(){
             """본문에 영어·의학용어가 있으면 알아서 한글로 해석한다 — 멈추면 먼저 내장 사전·KCD 영문명으로 즉시, 영어가 있으면 이어서 AI로 나머지까지"""
             st["tchg"] = tid = st.get("tchg", 0) + 1
             await asyncio.sleep(1.0)
-            text = (box.value or "").strip()
+            raw = box.value or ""
+            masked, pc = pii.mask(raw)
+            if masked != raw:                      # 직접 입력·붙여넣은 글의 개인정보도 가린다
+                box.set_value(masked)
+                ui.notify(f"개인정보를 가렸습니다 — {pii.summary(pc)}", type="info", icon="visibility_off", timeout=6000)
+            text = masked.strip()
             if st["tchg"] != tid or len(text) < 3 or st.get("ocr") == "busy" or rt["terms"] == "busy":
                 return
             rows = local_now()
