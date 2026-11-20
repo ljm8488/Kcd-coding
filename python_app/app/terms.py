@@ -48,6 +48,72 @@ def local_terms(text: str, dept_terms: list[list[str]] | None = None, union: dic
     return sorted(found.values(), key=lambda r: -r["n"])
 
 
+_EN_CACHE: dict = {"key": None, "map": {}}
+_EN_STOP = {"other", "others", "unspecified", "acute", "chronic", "disease", "diseases", "disorder", "disorders", "syndrome", "injury",
+            "infection", "tumor", "neoplasm", "failure", "benign", "malignant", "primary", "secondary", "primary", "mild", "severe",
+            "left", "right", "both", "pain", "of", "with", "without", "and", "the"}
+_WORD = re.compile(r"[A-Za-z][A-Za-z\-']+")
+
+
+def has_english(text: str) -> bool:
+    """영어 단어(3글자 이상)나 영문 약어(대문자 2~6자)가 본문에 있는지"""
+    return bool(re.search(r"[A-Za-z]{3,}", text or "") or re.search(r"\b[A-Z]{2,6}\b", text or ""))
+
+
+def _english_map(rows: list) -> dict:
+    """KCD 영문명 → (한글명, 코드, 영문명). 쉼표·괄호 앞 대표 표기만, 같은 표기는 가장 짧은(상위) 코드를 쓴다."""
+    key = (len(rows), rows[0][0] if rows else "", rows[-1][0] if rows else "")
+    if _EN_CACHE["key"] == key:
+        return _EN_CACHE["map"]
+    m: dict[str, tuple] = {}
+    for r in rows:
+        if len(r) < 3 or not r[2]:
+            continue
+        head = re.split(r"[,(;]|\bNOS\b|\bunspecified\b", r[2], maxsplit=1, flags=re.I)[0].strip().lower()
+        words = head.split()
+        if len(head) < 4 or not 1 <= len(words) <= 4 or head in _EN_STOP or not re.fullmatch(r"[a-z][a-z\-' ]+", head):
+            continue
+        cur = m.get(head)
+        rk = (len(r[0].replace(".", "")), len(r[1]))
+        if cur is None or rk < (len(cur[1].replace(".", "")), len(cur[0])):
+            m[head] = (r[1], r[0], r[2])
+    _EN_CACHE.update(key=key, map=m)
+    return m
+
+
+def _clean_ko(ko: str) -> str:
+    """KCD 한글명의 ‘상세불명의 · 기타 명시된 · …을 동반한’ 같은 분류용 수식을 떼어 일반 용어에 가깝게 만든다"""
+    s = re.sub(r"^(기타 및 )?(상세불명 병원체|상세불명|기타 명시된|기타)(의|인)?\s*", "", ko.strip())
+    s = re.sub(r"^[^,]{1,24}(을|를)\s*동반한\s+", "", s)
+    return s.strip() or ko
+
+
+def english_terms(text: str, rows: list) -> list[dict]:
+    """본문 속 영어 의학용어(예: pneumonia, hypertension)를 KCD 영문명으로 찾아 한글로 해석한다 — 긴 표현 우선."""
+    if not text or not rows:
+        return []
+    emap = _english_map(rows)
+    toks = [t.lower() for t in _WORD.findall(text)]
+    orig = _WORD.findall(text)
+    used = [False] * len(toks)
+    found: dict[str, dict] = {}
+    for n in (4, 3, 2, 1):
+        for i in range(len(toks) - n + 1):
+            if any(used[i:i + n]):
+                continue
+            ph = " ".join(toks[i:i + n])
+            hit = emap.get(ph) or (emap.get(ph[:-1]) if ph.endswith("s") else None)
+            if not hit or (n == 1 and (len(ph) < 5 or ph in _EN_STOP)):
+                continue
+            for j in range(i, i + n):
+                used[j] = True
+            row = found.setdefault(ph, {"term": " ".join(orig[i:i + n]), "kind": "용어", "meaning": _clean_ko(hit[0]), "english": hit[2],
+                                        "note": f"KCD {hit[1]} · {hit[0]}" if _clean_ko(hit[0]) != hit[0] else f"KCD {hit[1]}",
+                                        "src": "KCD 영문명", "n": 0})
+            row["n"] += 1
+    return sorted(found.values(), key=lambda r: -r["n"])
+
+
 def merge(local: list[dict], ai: list[dict]) -> list[dict]:
     """내장 사전 결과 + AI 해석을 합친다 (같은 표기는 내장 사전을 우선하고 AI 의 영문·비고만 보탠다)."""
     out = {r["term"].lower(): dict(r) for r in local}

@@ -181,7 +181,7 @@ def index_page() -> None:
         if trees:
             show(trees[0])
 
-# ───────────── AI 자동 코딩 (문서 판독 · 환자 조건 · 청구 목록 · 룰 점검) ─────────────
+# ───────────── AI 자동 코딩 (문서 판독 · 환자 조건 · 용어 해석) ─────────────
 SEV_COLOR = {"삭감": "var(--bad)", "조정": "var(--warn)", "확인": "#6a91b7"}
 
 
@@ -262,7 +262,7 @@ window.kcmSnip=function(){
     fam = rules.Family(idx)
     names = {r.code.upper(): r.ko for r in idx.rows}
     cond = load_cond()
-    st = {"claim": [], "docs": [], "terms": []}   # claim: [{code, kind}], docs: [{name, mime, data, sel}]
+    st = {"docs": [], "terms": []}   # docs: [{name, mime, data, sel}]
 
     with ui.column().classes("w-full max-w-6xl gap-4"):
         ui.label("AI 자동 코딩 · 임상 텍스트 분석").classes("kcm-h1")
@@ -473,16 +473,21 @@ window.kcmSnip=function(){
                     ui.label("환자").classes("text-muted").style("font-size:13px")
                     sex = ui.select({"": "성별 미입력", "M": "남", "F": "여"}, value="").props("dense outlined").classes("grow")
                     age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("grow")
-                box = ui.textarea(placeholder="예) 70세 남자, 기침·발열로 내원, 흉부 X-ray상 우하엽 폐렴, 고혈압 약 복용 중") \
+                box = ui.textarea(placeholder="예) 소견서 · 의무기록\n"
+                                          "입원사유: 기침·발열, 호흡곤란\n"
+                                          "과거력: 고혈압(HTN), 당뇨(DM)\n"
+                                          "검사: 흉부 X-ray 우하엽 폐렴\n"
+                                          "치료경과: 항생제 투여 후 호전\n"
+                                          "최종진단: 폐렴, 고혈압, 당뇨병") \
                     .props("outlined input-style='min-height:210px;max-height:210px;"
                            "resize:none;font-size:15px;line-height:1.7'").classes("w-full")
                 with ui.row().classes("gap-2 w-full no-wrap"):
                     btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow")
                     ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline size=lg").style("white-space:nowrap;flex:none")
                     ui.button(icon="print", on_click=lambda: print_result(), color=None).props("outline size=lg").style(
-                        "flex:none;color:var(--color-accent)").tooltip("판독 결과 인쇄 (본문 · AI 코드 후보 · 용어 해석 · 청구 목록)")
+                        "flex:none;color:var(--color-accent)").tooltip("판독 결과 인쇄 (본문 · AI 코드 후보 · 용어 해석)")
                 status = ui.label("").classes("text-muted").style("font-size:12px")
-                ui.label("한 번 누르면 ② 코드 후보와 ③ 용어 해석이 동시에 진행됩니다. 성별·연령은 아래 ④ 청구 코드 점검에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
+                ui.label("한 번 누르면 ② 코드 후보와 ③ 용어 해석이 동시에 진행됩니다. 성별·연령은 코드 후보의 성별·연령 불일치 경고에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
         # ── 해석 결과 — AI 해석(코드 후보)과 의학용어·약어 해석을 두 탭으로 나눠 보여 주고, 실행하면 동시에 진행한다
         ui.add_css(""".kcm-tbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-divider);border-radius:8px;min-height:40px;
  padding:0 14px;background:var(--surface);cursor:pointer;user-select:none;font-family:var(--font-heading);font-weight:600;font-size:15px}
@@ -519,6 +524,7 @@ window.kcmSnip=function(){
             "border:1px solid var(--color-accent);color:var(--color-accent);vertical-align:middle}"
             ".kcm-docs-tx small{font-size:12.5px;color:var(--muted);line-height:1.4}"
             ".kcm-docs .q-item__section--side{color:var(--color-accent)}"
+            ".kcm-inputcol textarea::placeholder{color:#8e959c!important;opacity:1!important;font-weight:400}"
             ".kcm-steps{padding:10px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--color-divider)}"
             "@keyframes kcm-pulse{0%{box-shadow:0 0 0 0 var(--a300)}70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}")
         with ui.element("div").classes("kcm-split") as split_el:
@@ -528,7 +534,7 @@ window.kcmSnip=function(){
                 ui.label("의무기록을 AI가 읽고 KCD 상병코드 후보를 제안합니다.").classes("kcm-note1")
                 with ui.expansion("자세히 보기", icon="info_outline").props("dense").classes("kcm-more w-full"):
                     ui.html("각 후보에는 <b>정확도(%)</b>와 <b>근거</b>가 붙고, 상병마스터에 실제 있는 코드인지 검증합니다. "
-                            "후보의 <b>＋</b> 버튼으로 아래 청구 목록에 담아 룰 점검(성별·연령·주진단 등)을 할 수 있습니다.")
+                            "후보의 ★ 버튼으로 개인 코드집에, 🕘 버튼으로 코딩 이력에 담을 수 있습니다.")
                 out = ui.column().classes("w-full gap-2 kcm-scroll")
                 with out:
                     ui.html('<div class="kcm-empty"><span style="font-size:26px">✦</span>‘AI 해석 실행’을 누르면<br>KCD 코드 후보가 여기에 나타납니다.</div>')
@@ -611,7 +617,12 @@ window.kcmSnip=function(){
         def local_now() -> list:
             """내장 사전으로 즉시 해석 — AI 코딩에도 함께 전달된다"""
             from .phase4 import DEPT_LEX
-            st["terms"] = terms.local_terms((box.value or "").strip(), DEPT_LEX.get(cond["dept"], {}).get("terms"), _union())
+            text_ = (box.value or "").strip()
+            loc = terms.local_terms(text_, DEPT_LEX.get(cond["dept"], {}).get("terms"), _union())
+            seen = {r["term"].lower() for r in loc}
+            # 영어 의학용어(pneumonia 등)는 KCD 영문명으로 즉시 한글 해석 — AI 없이도 나온다
+            loc += [r for r in terms.english_terms(text_, store.kcd_master().get("rows") or []) if r["term"].lower() not in seen]
+            st["terms"] = loc
             return st["terms"]
 
         async def interpret() -> None:
@@ -620,6 +631,7 @@ window.kcmSnip=function(){
                 ui.notify("해석할 본문이 없습니다.", type="warning")
                 return
             local = local_now()
+            st["auto_sig"] = hash(text)
             rt["terms"] = "busy"
             render_rbar()
             terms_status.set_text("내장 사전으로 해석했습니다. AI가 나머지 의학용어를 해석하는 중입니다…")
@@ -734,81 +746,8 @@ window.kcmSnip=function(){
 
         ocr_btn.on_click(run_ocr)
 
-        # ── 청구 목록 · 룰 점검
-        with ui.column().classes("w-full gap-2"):
-            ui.html('<div class="kcm-tbtn on" style="cursor:default;width:100%"><span class="kcm-step">4</span>청구 코드 점검 · 삭감 위험 확인</div>').classes("w-full")
-        with ui.column().classes("kcm-card w-full gap-2").style("margin-top:-6px"):
-            ui.html("② AI 후보의 <b>＋</b> 버튼으로 담거나 코드를 직접 입력해 <b>청구할 상병 목록</b>을 만든 뒤 <b>[점검 실행]</b>을 누르면, "
-                    "청구 전에 <b>삭감·조정 위험</b>을 미리 알려 드립니다. "
-                    "<span class='text-muted'>(주진단 1개 여부 · 성별/연령 불일치 · 불완전 코드 · 중복 · 증상코드 병기 · 배타 관계 등)</span>").style("font-size:13px;line-height:1.6")
-            with ui.row().classes("items-center gap-2"):
-                new_code = ui.input(placeholder="코드 직접 추가 (예: J18.9)").props("dense outlined").classes("w-52")
-
-                def add_manual() -> None:
-                    c = (new_code.value or "").strip().upper()
-                    if c:
-                        add_claim(c)
-                        new_code.set_value("")
-                new_code.on("keydown.enter", add_manual)
-                ui.button("추가", on_click=add_manual).props("no-caps outline dense")
-            claim_box = ui.column().classes("w-full gap-1")
-            find_box = ui.column().classes("w-full gap-2")
-            ui.button("점검 실행", icon="rule", on_click=lambda: run_rules()).props("no-caps unelevated color=primary")
-
-        def add_claim(code: str) -> None:
-            if any(r["code"] == code for r in st["claim"]):
-                ui.notify("이미 목록에 있습니다.")
-                return
-            st["claim"].append({"code": code, "kind": "주진단" if not st["claim"] else "부진단"})
-            render_claim()
-
-        def render_claim() -> None:
-            claim_box.clear()
-            with claim_box:
-                if not st["claim"]:
-                    ui.html('<div class="kcm-empty" style="padding:14px 12px">아직 담은 코드가 없습니다. 위 ② AI 해석 결과의 <b>＋</b>를 누르거나 코드를 직접 입력하세요.</div>')
-                for r in st["claim"]:
-                    with ui.row().classes("items-center no-wrap gap-3 w-full"):
-                        ui.label(r["code"]).classes("font-bold").style("min-width:72px;color:var(--accent-hi)")
-                        ui.label(names.get(r["code"], "⚠ 코드집에 없음")).classes("text-sm grow")
-                        ui.toggle(["주진단", "부진단"], value=r["kind"], on_change=lambda e, r=r: r.update(kind=e.value)).props("dense no-caps")
-                        ui.button(icon="delete", on_click=lambda _, r=r: (st["claim"].remove(r), render_claim())).props("flat round dense size=sm")
-
         def current_ctx() -> tuple[str, int | None]:
             return sex.value or "", parse_age(age.value)
-
-        def run_rules() -> None:
-            find_box.clear()
-            s, a = current_ctx()
-            findings = rules.check_claim(st["claim"], s, a, fam)
-            with find_box:
-                if not st["claim"]:
-                    ui.label("점검할 코드가 없습니다.").classes("text-sm text-muted")
-                    return
-                if not findings:
-                    ui.label("✔ 점검 규칙에 걸리는 항목이 없습니다.").style("color:var(--ok)")
-                for f in findings:
-                    with ui.column().classes("w-full gap-1").style(
-                            f"border-left:4px solid {SEV_COLOR[f['sev']]};padding:6px 12px;background:var(--surface2);border-radius:6px"):
-                        ui.label(f"[{f['sev']}] {f['code']} · {f['title']}").classes("font-semibold text-sm")
-                        ui.label(f["note"]).classes("text-sm text-muted")
-                        if f["alts"] and f["fix"] != "none":
-                            with ui.row().classes("items-center gap-2"):
-                                ui.label({"replace": "교체:", "remove": "삭제:", "demote": "주진단으로:", "promote": "주진단으로:",
-                                          "keepone": "주진단으로 남길 코드:", "dedupe": ""}.get(f["fix"], "")).classes("text-xs text-muted")
-                                for alt in f["alts"]:
-                                    ui.button(f"{alt} {names.get(alt, '')[:14]}", on_click=lambda _, f=f, alt=alt: apply(f, alt)) \
-                                        .props("outline dense no-caps size=sm")
-                        elif f["fix"] in ("dedupe",):
-                            ui.button("중복 행 삭제", on_click=lambda _, f=f: apply(f, f["code"])).props("outline dense no-caps size=sm")
-                        elif f["fix"] == "remove":
-                            ui.button(f"{f['code']} 삭제", on_click=lambda _, f=f: apply(f, f["code"])).props("outline dense no-caps size=sm")
-
-        def apply(f: dict, pick: str) -> None:
-            st["claim"] = rules.apply_fix(st["claim"], f, pick)
-            render_claim()
-            run_rules()
-
         async def analyze() -> None:
             text = (box.value or "").strip()
             if len(text) < 5:
@@ -868,32 +807,15 @@ window.kcmSnip=function(){
                                 add_history((box.value or "")[:60], code, known or c.get("name_ko", ""), f"{c.get('confidence', 0)}%", "AI 제안")
                                 ui.notify("이력에 기록했습니다.", type="positive")
 
-                            def to_claim(code=code, c=c) -> None:
-                                add_claim(code)
-                                if c.get("primary") and not any(r["kind"] == "주진단" and r["code"] != code for r in st["claim"]):
-                                    for r in st["claim"]:
-                                        r["kind"] = "주진단" if r["code"] == code else "부진단"
-                                    render_claim()
                             with ui.row().classes("gap-1"):
-                                ui.button(icon="playlist_add", on_click=to_claim).props("flat round dense").tooltip("청구 목록에 담기")
                                 ui.button(icon="star", on_click=save_fav).props("flat round dense").tooltip("코드집에 담기")
                                 ui.button(icon="history", on_click=save_hist).props("flat round dense").tooltip("이력에 기록")
                                 ui.button(icon="manage_search", on_click=lambda _, code=code: ui.navigate.to(f"/detail?code={code}")).props("flat round dense").tooltip("정밀 분석")
-                if shown:
-                    def add_all() -> None:
-                        for c in shown:
-                            code = str(c.get("code", "")).strip().upper()
-                            if code and not any(r["code"] == code for r in st["claim"]):
-                                st["claim"].append({"code": code, "kind": "주진단" if (c.get("primary") and not any(r["kind"] == "주진단" for r in st["claim"])) else "부진단"})
-                        if st["claim"] and not any(r["kind"] == "주진단" for r in st["claim"]):
-                            st["claim"][0]["kind"] = "주진단"
-                        render_claim()
-                    ui.button("후보 모두 청구 목록에 담기", icon="playlist_add", on_click=add_all).props("no-caps outline")
                 if res.get("caution"):
                     ui.label("주의: " + res["caution"]).classes("text-sm text-muted")
 
         def print_result() -> None:
-            """판독 결과 인쇄 — 본문 · AI 코드 후보 · 용어 해석 · 청구 목록을 A4 한 문서로 만들어 인쇄창을 연다"""
+            """판독 결과 인쇄 — 본문 · AI 코드 후보 · 용어 해석을 A4 한 문서로 만들어 인쇄창을 연다"""
             import json
             import datetime as dt
             e = html.escape
@@ -920,9 +842,6 @@ window.kcmSnip=function(){
             if st["terms"]:
                 rows = "".join(f"<tr><td>{e(r['term'])}</td><td class='c'>{e(r['kind'])}</td><td>{e(r['meaning'])}{(' (' + e(r['english']) + ')') if r.get('english') else ''}</td></tr>" for r in st["terms"])
                 parts.append("<h2>의학용어 · 약어 해석</h2><table><tr><th>용어·약어</th><th>구분</th><th>해석</th></tr>" + rows + "</table>")
-            if st["claim"]:
-                rows = "".join(f"<tr><td class='c'>{e(r['code'])}</td><td>{e(names.get(r['code'], '코드집에 없음'))}</td><td class='c'>{e(r['kind'])}</td></tr>" for r in st["claim"])
-                parts.append("<h2>청구 코드 목록</h2><table><tr><th>코드</th><th>상병명</th><th>구분</th></tr>" + rows + "</table>")
             parts.append("<p class='foot'>※ AI가 제안한 내용은 참고용이며 최종 코딩은 담당자의 확인이 필요합니다.</p>")
             doc = ("<!doctype html><html><head><meta charset='utf-8'><title>의무기록 판독 결과</title><style>"
                    "@page{size:A4;margin:16mm}body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#111;font-size:12px;line-height:1.55}"
@@ -936,5 +855,24 @@ window.kcmSnip=function(){
                 "document.body.appendChild(f);var d=f.contentWindow.document;d.open();d.write(h);d.close();"
                 "setTimeout(function(){f.contentWindow.focus();f.contentWindow.print();setTimeout(function(){f.remove()},60000)},300)})(" + json.dumps(doc) + ")")
 
-        render_claim()
+        async def on_text_change(_=None) -> None:
+            """본문에 영어·의학용어가 있으면 알아서 한글로 해석한다 — 멈추면 먼저 내장 사전·KCD 영문명으로 즉시, 영어가 있으면 이어서 AI로 나머지까지"""
+            st["tchg"] = tid = st.get("tchg", 0) + 1
+            await asyncio.sleep(1.0)
+            text = (box.value or "").strip()
+            if st["tchg"] != tid or len(text) < 3 or st.get("ocr") == "busy" or rt["terms"] == "busy":
+                return
+            rows = local_now()
+            rt["terms"], rt["terms_n"] = ("done" if rows else "idle"), len(rows)
+            terms_status.set_text(f"본문에서 {len(rows)}건을 찾아 해석했습니다." if rows else "")
+            render_terms()
+            render_rbar()
+            if not terms.has_english(text) or hash(text) == st.get("auto_sig"):
+                return
+            await asyncio.sleep(1.5)                       # 입력이 더 이어지지 않을 때만 AI 호출
+            if st["tchg"] != tid or rt["terms"] == "busy":
+                return
+            await interpret()
+        box.on_value_change(on_text_change)
+
         render_terms()
