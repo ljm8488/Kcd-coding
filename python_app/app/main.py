@@ -107,6 +107,21 @@ body{--q-primary:var(--color-accent)}
  box-shadow:inset 0 0 0 1px var(--color-divider)}
 .kcm-item.active .kcm-tile{background:var(--color-accent);color:#fff;box-shadow:0 1px 2px rgba(29,31,32,.2)}
 .kcm-sub{margin-left:20px;border-left:2px solid var(--a300);border-radius:6px;min-height:34px;font-size:13px}
+.kcm-side{transition:width .18s ease}
+.kcm-acct-mini{display:none}
+@media (min-width:760px){
+.kcm-side.mini .kcm-acct-mini{flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 0;border-top:1px solid var(--color-divider);background:var(--surface-2)}
+.kcm-side.mini{width:68px}
+.kcm-side.mini .kcm-hd-x,.kcm-side.mini .kcm-lbl,.kcm-side.mini .kcm-grp-h,.kcm-side.mini .kcm-subtoggle,.kcm-side.mini .kcm-acct{display:none!important}
+.kcm-side.mini .kcm-side-head{justify-content:center;margin:0 8px}
+.kcm-side.mini .kcm-collapse .q-icon{transform:rotate(180deg)}
+.kcm-side.mini .kcm-grp{padding:0 8px}
+.kcm-side.mini .kcm-grp>.hidden{display:grid!important}
+.kcm-side.mini .kcm-grp+.kcm-grp{border-top:1px solid var(--color-divider);padding-top:10px}
+.kcm-side.mini .kcm-item{justify-content:center;padding:0;min-height:44px}
+.kcm-side.mini .kcm-item .q-row,.kcm-side.mini .kcm-item .row{justify-content:center}
+.kcm-side.mini .kcm-sub{margin-left:0;border-left:0}
+}
 .kcm-acct{flex:none;border-top:1px solid var(--color-divider);padding:12px;display:grid;gap:10px;background:var(--surface-2);
  box-shadow:0 -6px 12px -8px rgba(0,0,0,.25)}
 .kcm-seg{display:inline-flex;overflow:hidden;border:1px solid var(--color-divider);border-radius:8px;background:var(--surface)}
@@ -179,7 +194,7 @@ NAV_GROUPS = [("조회", ["search", "index", "nlp"]), ("내 작업", ["history",
 SCOPE_SHORT = {"sysadmin": "시스템 전체 관리", "orgadmin": "소속 기관 관리", "user": "시스템 사용"}
 
 
-UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols", "nav_groups", "nav_items", "nav_collapsed")
+UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols", "nav_groups", "nav_items", "nav_collapsed", "nav_mini")
 
 
 def load_ui_pref() -> None:
@@ -327,12 +342,20 @@ def layout(active: str) -> None:
                 ui.label(TITLES.get(active, ""))
     shell = ui.element("div").classes("kcm-shell")
     with shell:
-        with ui.element("aside").classes("kcm-side"):
+        with ui.element("aside").classes("kcm-side" + (" mini" if app.storage.user.get("nav_mini") else "")) as aside:
             with ui.element("div").classes("kcm-side-top"):
                 with ui.element("div").classes("kcm-side-head"):
-                    ui.html("<b>메뉴</b>").style("flex:1")
-                    ui.label("끌어서 순서 변경").classes("text-muted").style("font-size:10px")
-                    ui.button(icon="restart_alt", on_click=lambda: reset_nav()).props("flat round dense size=sm").tooltip("메뉴 순서 초기화")
+                    ui.html("<b>메뉴</b>").classes("kcm-hd-x").style("flex:1")
+                    ui.label("끌어서 순서 변경").classes("text-muted kcm-hd-x").style("font-size:10px")
+                    ui.button(icon="restart_alt", on_click=lambda: reset_nav()).props("flat round dense size=sm").classes("kcm-hd-x").tooltip("메뉴 순서 초기화")
+
+                    def toggle_mini() -> None:     # 왼쪽으로 접어 아이콘만 보이게 / 다시 펴기 — 사용자별로 기억
+                        on = not app.storage.user.get("nav_mini")
+                        app.storage.user["nav_mini"] = on
+                        save_ui_pref(nav_mini=on)
+                        aside.classes(add="mini") if on else aside.classes(remove="mini")
+                    ui.button(icon="chevron_left", on_click=toggle_mini, color=None).props("flat round dense size=sm").classes("kcm-collapse").style(
+                        "color:var(--color-accent)").tooltip("메뉴 접기 · 펴기 (아이콘만 보기)")
                 nav_box = ui.element("div").style("display:grid;gap:12px")
 
                 default_groups = dict(NAV_GROUPS)
@@ -377,22 +400,22 @@ def layout(active: str) -> None:
                                     for key in keys:
                                         icon, href = NAV_INFO[key]
                                         with ui.link(target=href).classes("kcm-item" + (" active" if key == active else "")).props(
-                                                f'draggable="true" data-dnd="nav:{title}" data-key="{key}" title="끌어서 순서 변경"'):
+                                                f'draggable="true" data-dnd="nav:{title}" data-key="{key}" title="{TITLES[key]} · 끌어서 순서 변경"'):
                                             with ui.row().classes("items-center no-wrap gap-2"):
                                                 with ui.element("span").classes("kcm-tile"):
                                                     ui.icon(icon).classes("text-lg")
-                                                ui.label(TITLES[key]).style("white-space:nowrap")
+                                                ui.label(TITLES[key]).classes("kcm-lbl").style("white-space:nowrap")
                                             if key == "search":      # 하위 메뉴(조건 설정) 접기·펴기 — 선택은 사용자별로 기억
                                                 sub_hidden = "sub:search" in (app.storage.user.get("nav_collapsed") or [])
                                                 ui.button(icon="chevron_right" if sub_hidden else "expand_more", color=None,
                                                           on_click=lambda: toggle_sub("sub:search")).props("flat dense round size=sm").classes("kcm-subtoggle").style(
                                                     "margin-left:auto").tooltip("하위 메뉴 펴기" if sub_hidden else "하위 메뉴 숨기기").on("click.stop.prevent", lambda: None)
                                         if key == "search" and ("sub:search" not in (app.storage.user.get("nav_collapsed") or []) or active == "cond"):
-                                            with ui.link(target="/cond").classes("kcm-item kcm-sub" + (" active" if active == "cond" else "")):
+                                            with ui.link(target="/cond").classes("kcm-item kcm-sub" + (" active" if active == "cond" else "")).props('title="조건 설정"'):
                                                 with ui.row().classes("items-center no-wrap gap-2"):
                                                     with ui.element("span").classes("kcm-tile").style("width:24px;height:24px;border-radius:6px"):
                                                         ui.icon("tune").classes("text-base")
-                                                    ui.label("조건 설정").style("white-space:nowrap")
+                                                    ui.label("조건 설정").classes("kcm-lbl").style("white-space:nowrap")
 
                 def set_collapsed(name: str, on: bool) -> None:
                     cur = [x for x in (app.storage.user.get("nav_collapsed") or []) if x != name]
@@ -432,6 +455,9 @@ def layout(active: str) -> None:
                 ui.on("dnd_reorder", on_nav_dnd)
                 render_nav()
             account_panel(dm, u)
+            with ui.element("div").classes("kcm-acct-mini"):     # 접힌 메뉴에서만 보이는 최소 기능: 화면 모드 · 로그아웃
+                theme_toggle(dm)
+                ui.button(icon="logout", on_click=logout, color=None).props("flat round dense").style("color:var(--color-accent)").tooltip("로그아웃")
         ui.element("div").classes("kcm-backdrop").on(
             "click", js_handler="() => document.querySelector('.kcm-side').classList.remove('open')")
     main = ui.column().classes("kcm-main gap-3")

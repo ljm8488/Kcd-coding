@@ -287,7 +287,7 @@ window.kcmSnip=function(){
                     ui.button("화면 캡처", icon="screenshot_monitor", on_click=lambda: ui.run_javascript("kcmSnip()")) \
                         .props("outline no-caps").on("click.stop", lambda: None).style("flex:none;background:var(--surface)") \
                         .tooltip("Windows 캡처 도구 실행 (Win + Shift + S) — 캡처하면 자동 첨부")
-            steps_row = ui.row().classes("items-center w-full no-wrap gap-2").style("font-size:12px")
+            steps_row = ui.row().classes("items-center w-full no-wrap gap-3 kcm-steps").style("font-size:14px")
 
             def render_steps() -> None:
                 """1 문서 첨부 → 2 판독 파일 선택 → 3 판독 실행 — 사용자가 어디까지 했는지 단계마다 표시한다."""
@@ -303,22 +303,22 @@ window.kcmSnip=function(){
                 steps_row.clear()
                 with steps_row:
                     for i, ((lab, extra), s_) in enumerate(zip(labels, (s1, s2, s3)), 1):
-                        with ui.row().classes("items-center gap-1 no-wrap"):
-                            circ = {"todo": "border:1px solid var(--color-divider);color:var(--muted)",
-                                    "current": "border:2px solid var(--color-accent);color:var(--color-accent);background:var(--a100)",
-                                    "done": "border:1px solid var(--color-accent);background:var(--color-accent);color:#fff",
-                                    "busy": "border:2px solid var(--color-accent);color:var(--color-accent)",
-                                    "error": "border:1px solid var(--warn);color:var(--warn)"}[s_]
-                            with ui.element("span").style("width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:12px;" + circ):
+                        with ui.row().classes("items-center gap-2 no-wrap"):
+                            circ = {"todo": "border:2px solid var(--color-divider);color:var(--muted);background:var(--surface)",
+                                    "current": "border:2px solid var(--color-accent);color:var(--color-accent);background:var(--a100);animation:kcm-pulse 1.6s ease-out infinite",
+                                    "done": "border:2px solid var(--color-accent);background:var(--color-accent);color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.25)",
+                                    "busy": "border:2px solid var(--color-accent);color:var(--color-accent);background:var(--a100);animation:kcm-pulse 1.1s ease-out infinite",
+                                    "error": "border:2px solid var(--warn);color:var(--warn);background:var(--surface)"}[s_]
+                            with ui.element("span").style("flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:15px;" + circ):
                                 if s_ == "busy":
                                     ui.html('<i class="kcm-spin"></i>')
                                 else:
                                     ui.label({"done": "✓", "error": "!"}.get(s_, str(i)))
-                            ui.label(lab + extra).style("white-space:nowrap;" + ("font-weight:700;color:var(--color-accent)" if s_ in ("current", "busy") else
-                                                                                    ("color:var(--muted)" if s_ == "todo" else "")))
+                            ui.label(lab + extra).style("white-space:nowrap;font-size:14px;font-weight:700;" + ("color:var(--color-accent)" if s_ in ("current", "busy") else
+                                                                                    ("color:var(--muted);font-weight:600" if s_ == "todo" else "color:var(--color-text)")))
                         if i < 3:
                             nxt = (s1, s2, s3)[i - 1]
-                            ui.element("span").style("flex:1 1 24px;min-width:16px;height:2px;border-radius:1px;background:"
+                            ui.element("span").style("flex:1 1 24px;min-width:16px;height:4px;border-radius:2px;background:"
                                                      + ("var(--color-accent)" if nxt == "done" else "var(--color-divider)"))
             with ui.row().classes("w-full gap-3 items-stretch").style("flex-wrap:wrap"):
                 up = ui.upload(on_upload=lambda e: on_upload(e), multiple=True, auto_upload=True) \
@@ -465,21 +465,22 @@ window.kcmSnip=function(){
             ui.button(icon="stop", on_click=lambda: ocr_cancel.update(v=True)).props("flat round dense size=sm").style("color:var(--warn)").tooltip("판독 중단")
         prog_card.set_visibility(False)
         # ── ① 의무기록 입력 (아래 작업 영역의 첫 칸으로 옮겨진다)
-        with ui.column().classes("kcm-card gap-3 kcm-inputcol") as body_card:
-            ui.html('<div class="kcm-tbtn on" style="cursor:default;width:100%"><span class="kcm-step">1</span>의무기록 입력</div>')
-            ui.label("입원사유 · 과거력 · 검사 · 치료경과 · 최종진단을 붙여 넣거나, 위 ‘문서 첨부’로 판독해 채웁니다.").classes("kcm-note1")
-            with ui.row().classes("items-center gap-2 w-full no-wrap"):
-                ui.label("환자").classes("text-muted").style("font-size:13px")
-                sex = ui.select({"": "성별 미입력", "M": "남", "F": "여"}, value="").props("dense outlined").classes("grow")
-                age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("grow")
-            box = ui.textarea(placeholder="예) 70세 남자, 기침·발열로 내원, 흉부 X-ray상 우하엽 폐렴, 고혈압 약 복용 중") \
-                .props("outlined input-style='min-height:calc(100vh / var(--z, 1) - 575px);max-height:calc(100vh / var(--z, 1) - 575px);"
-                       "resize:none;font-size:15px;line-height:1.7'").classes("w-full")
-            with ui.row().classes("gap-2 w-full no-wrap"):
-                btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow")
-                ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline size=lg").style("white-space:nowrap;flex:none")
-            status = ui.label("").classes("text-muted").style("font-size:12px")
-            ui.label("한 번 누르면 ② 코드 후보와 ③ 용어 해석이 동시에 진행됩니다. 성별·연령은 아래 룰 점검에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
+        with ui.column().classes("gap-2 w-full kcm-inputcol") as body_card:
+            ui.html('<div class="kcm-tbtn on" style="cursor:default;width:100%"><span class="kcm-step">1</span>의무기록 입력</div>').classes("w-full")
+            with ui.column().classes("kcm-card gap-3 w-full"):
+                ui.label("입원사유 · 과거력 · 검사 · 치료경과 · 최종진단을 붙여 넣거나, 위 ‘문서 첨부’로 판독해 채웁니다.").classes("kcm-note1")
+                with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                    ui.label("환자").classes("text-muted").style("font-size:13px")
+                    sex = ui.select({"": "성별 미입력", "M": "남", "F": "여"}, value="").props("dense outlined").classes("grow")
+                    age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("grow")
+                box = ui.textarea(placeholder="예) 70세 남자, 기침·발열로 내원, 흉부 X-ray상 우하엽 폐렴, 고혈압 약 복용 중") \
+                    .props("outlined input-style='min-height:calc(100vh / var(--z, 1) - 575px);max-height:calc(100vh / var(--z, 1) - 575px);"
+                           "resize:none;font-size:15px;line-height:1.7'").classes("w-full")
+                with ui.row().classes("gap-2 w-full no-wrap"):
+                    btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow")
+                    ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline size=lg").style("white-space:nowrap;flex:none")
+                status = ui.label("").classes("text-muted").style("font-size:12px")
+                ui.label("한 번 누르면 ② 코드 후보와 ③ 용어 해석이 동시에 진행됩니다. 성별·연령은 아래 룰 점검에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
         # ── 해석 결과 — AI 해석(코드 후보)과 의학용어·약어 해석을 두 탭으로 나눠 보여 주고, 실행하면 동시에 진행한다
         ui.add_css(""".kcm-tbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-divider);border-radius:8px;min-height:40px;
  padding:0 14px;background:var(--surface);cursor:pointer;user-select:none;font-family:var(--font-heading);font-weight:600;font-size:15px}
@@ -515,7 +516,9 @@ window.kcmSnip=function(){
             ".kcm-docs-tx em{font-style:normal;font-size:11px;font-weight:600;margin-left:8px;padding:2px 8px;border-radius:999px;"
             "border:1px solid var(--color-accent);color:var(--color-accent);vertical-align:middle}"
             ".kcm-docs-tx small{font-size:12.5px;color:var(--muted);line-height:1.4}"
-            ".kcm-docs .q-item__section--side{color:var(--color-accent)}")
+            ".kcm-docs .q-item__section--side{color:var(--color-accent)}"
+            ".kcm-steps{padding:10px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--color-divider)}"
+            "@keyframes kcm-pulse{0%{box-shadow:0 0 0 0 var(--a300)}70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}")
         with ui.element("div").classes("kcm-split") as split_el:
             # ── ② AI 해석 결과 (KCD 코드 후보)
             with ui.column().classes("gap-2 w-full") as col_ai:
