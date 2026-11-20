@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from nicegui import app, run, ui
 
 from . import gemini, pii, store, terms
-from .main import get_index, layout, require_login, user
+from .main import get_index, layout, require_login, save_ui_pref, user
 from .search import norm
 
 # 첨부 파일 미리보기용 임시 보관 (메모리, 2시간) — 추측할 수 없는 토큰 주소로만 열린다
@@ -482,12 +482,12 @@ window.kcmSnip=function(){
                     .props("outlined input-style='min-height:210px;max-height:210px;"
                            "resize:none;font-size:15px;line-height:1.7'").classes("w-full")
                 with ui.row().classes("gap-2 w-full no-wrap"):
-                    btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow")
-                    ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline size=lg").style("white-space:nowrap;flex:none")
-                    ui.button(icon="print", on_click=lambda: print_result(), color=None).props("outline size=lg").style(
+                    btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow").style("white-space:nowrap;min-width:0")
+                    ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline").style("white-space:nowrap;flex:none")
+                    ui.button(icon="print", on_click=lambda: print_result(), color=None).props("outline").style(
                         "flex:none;color:var(--color-accent)").tooltip("판독 결과 인쇄 (본문 · AI 코드 후보 · 용어 해석)")
                 status = ui.label("").classes("text-muted").style("font-size:12px")
-                ui.label("한 번 누르면 ② 코드 후보와 ③ 용어 해석이 동시에 진행됩니다. 성별·연령은 코드 후보의 성별·연령 불일치 경고에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
+                ui.label("한 번 누르면 ② 원문 해석 문서와 ③ 코드 후보가 동시에 진행됩니다. 성별·연령은 코드 후보의 성별·연령 불일치 경고에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
         # ── 해석 결과 — AI 해석(코드 후보)과 의학용어·약어 해석을 두 탭으로 나눠 보여 주고, 실행하면 동시에 진행한다
         ui.add_css(""".kcm-tbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-divider);border-radius:8px;min-height:40px;
  padding:0 14px;background:var(--surface);cursor:pointer;user-select:none;font-family:var(--font-heading);font-weight:600;font-size:15px}
@@ -501,7 +501,11 @@ window.kcmSnip=function(){
 .kcm-err{font-size:12px;color:var(--warn);font-weight:600}""")
         rt = {"ai": "idle", "terms": "idle", "ai_n": 0, "terms_n": 0}
         ui.add_css(
-            ".kcm-split{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start;width:100%}"
+            ".kcm-split{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:start;width:100%}"
+            ".kcm-docview{white-space:pre-wrap;word-break:break-word;font-size:15px;line-height:2.05;padding:4px 2px}"
+            ".kcm-tm{border-bottom:1.5px dotted var(--color-accent);white-space:normal}"
+            ".kcm-tm em{font-style:normal;font-weight:700;font-size:.88em;color:var(--color-accent);background:var(--a100);border-radius:4px;padding:0 5px;margin:0 2px 0 4px;white-space:nowrap}"
+            ".kcm-tm em::before{content:'→ '}"
             "@media (max-width:1450px){.kcm-split{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.kcm-split>.kcm-inputcol{grid-column:1/-1}}"
             "@media (max-width:820px){.kcm-split{grid-template-columns:minmax(0,1fr)}}"
             ".kcm-note1{font-size:13px;line-height:1.55;color:var(--color-text);opacity:.82}"
@@ -535,23 +539,29 @@ window.kcmSnip=function(){
                 with ui.expansion("자세히 보기", icon="info_outline").props("dense").classes("kcm-more w-full"):
                     ui.html("각 후보에는 <b>정확도(%)</b>와 <b>근거</b>가 붙고, 상병마스터에 실제 있는 코드인지 검증합니다. "
                             "후보의 ★ 버튼으로 개인 코드집에, 🕘 버튼으로 코딩 이력에 담을 수 있습니다.")
+                def set_ai_view(v: str) -> None:        # 보기 방식(카드형 · 요약 목록)은 사용자별로 기억
+                    app.storage.user["ai_view"] = v
+                    save_ui_pref(ai_view=v)
+                    render_ai_results()
+                ui.toggle({"card": "카드형", "list": "요약 목록"}, value=app.storage.user.get("ai_view", "card"),
+                          on_change=lambda e: set_ai_view(e.value)).props("dense no-caps unelevated toggle-color=primary").style("align-self:flex-start")
                 out = ui.column().classes("w-full gap-2 kcm-scroll")
                 with out:
                     ui.html('<div class="kcm-empty"><span style="font-size:26px">✦</span>‘AI 해석 실행’을 누르면<br>KCD 코드 후보가 여기에 나타납니다.</div>')
-            # ── ③ 의학용어 · 약어 해석
+            # ── ② 원문 해석 문서 — 원문 그대로 두고 의학용어·약어 옆에 한글 해석을 붙여 보여 준다 (용어표는 아래에 접어 둠)
             with ui.column().classes("gap-2 w-full") as col_terms:
                 hdr_terms = ui.row().classes("w-full items-center")
-                ui.label("본문의 약어와 의학용어를 표준 한글 용어로 풀어 줍니다.").classes("kcm-note1")
-                with ui.expansion("자세히 보기", icon="info_outline").props("dense").classes("kcm-more w-full"):
-                    ui.html("내장 약어 사전과 AI가 함께 해석하고, 진료과마다 뜻이 다른 약어는 모든 뜻을 보여 줍니다. "
-                            "<b>본문에 해석 반영</b>을 누르면 ‘HTN(고혈압)’처럼 본문에 풀어 적고, 이 해석은 AI 코드 제안에도 함께 전달됩니다.")
+                ui.label("원문 그대로 보여 주고, 의학용어·약어 옆에 한글 해석(→)을 붙입니다. 용어에 마우스를 올리면 영문명이 보입니다.").classes("kcm-note1")
                 with ui.column().classes("kcm-card w-full gap-2 kcm-scroll") as terms_panel:
                     terms_status = ui.label("").classes("text-muted").style("font-size:12px")
+                    doc_view = ui.html("").classes("kcm-docview w-full")
+                with ui.expansion("용어 · 약어 표", icon="table_rows").props("dense").classes("kcm-more w-full") as terms_exp:
                     terms_box = ui.column().classes("w-full gap-0")
+        col_terms.move(split_el, target_index=0)
         body_card.move(split_el, target_index=0)
 
         def render_rbar() -> None:
-            for k, hdr, lab in (("ai", hdr_ai, "2|AI 해석 결과"), ("terms", hdr_terms, "3|의학용어 · 약어 해석")):
+            for k, hdr, lab in (("ai", hdr_ai, "3|AI 해석 결과 · 코드 후보"), ("terms", hdr_terms, "2|원문 해석 문서")):
                 hdr.clear()
                 with hdr:
                     b = ui.element("div").classes("kcm-tbtn on").style("cursor:default;width:100%;justify-content:space-between")
@@ -580,12 +590,23 @@ window.kcmSnip=function(){
                     u.setdefault(ab.lower(), {}).setdefault(ko, []).append(dname)
             return u
 
+        def render_doc() -> None:
+            """② 원문 해석 문서 — 현재 본문(개인정보 가림 적용)에 해석을 붙여 보여 준다"""
+            text = pii.clean(box.value or "").strip()
+            if not text:
+                doc_view.set_content('<div class="kcm-empty"><span style="font-size:26px">Aa</span>문서를 판독하거나 본문을 입력하면<br>원문이 여기에 나타나고, 의학용어·약어 옆에 한글 해석이 붙습니다.</div>')
+                return
+            doc_view.set_content(terms.annotate_html(text, st["terms"]))
+
         def render_terms() -> None:
             terms_box.clear()
             rows = st["terms"]
+            render_doc()
+            terms_exp._props["label"] = f"용어 · 약어 표 ({len(rows)}건)" if rows else "용어 · 약어 표"
+            terms_exp.update()
             with terms_box:
                 if not rows:
-                    ui.html('<div class="kcm-empty" style="width:100%"><span style="font-size:26px">Aa</span>‘AI 해석 실행’을 누르면<br>본문의 약어·의학용어가 여기에 해석됩니다.</div>')
+                    ui.html('<div class="kcm-empty" style="width:100%">아직 해석된 용어가 없습니다.</div>')
                     return
                 grid = "display:grid;grid-template-columns:minmax(64px,100px) 52px minmax(0,1fr) 78px;gap:10px;align-items:start;padding:8px 4px;border-bottom:1px solid var(--color-divider)"
                 with ui.element("div").classes("text-muted w-full").style(grid + ";font-size:11px;letter-spacing:.06em"):
@@ -737,12 +758,13 @@ window.kcmSnip=function(){
                 prog_title.set_text(f"✓ 판독 완료 · 파일 {len(texts)}/{total}개 · {chars:,}자 · {took}초")
                 prog_detail.set_text("본문에 추가했습니다. 이어서 의학용어·약어를 해석합니다.")
                 box.set_value(((box.value or "").rstrip() + "\n\n" if (box.value or "").strip() else "") + "\n\n".join(texts))
-                ui.notify("판독 결과를 본문에 추가했습니다. 의학용어·약어를 해석합니다.", type="positive")
+                ui.notify("판독 결과를 본문에 추가했습니다. AI 해석을 이어서 진행합니다.", type="positive")
                 if pii.summary(pii_total):
                     ui.notify(f"개인정보를 가렸습니다 — {pii.summary(pii_total)}", type="info", icon="visibility_off", timeout=7000)
                 show_rtab("terms")
-                await interpret()
-                prog_detail.set_text("본문에 추가했고, 의학용어·약어 해석도 끝났습니다.")
+                prog_detail.set_text("본문에 추가했습니다. AI 해석(코드 후보)과 용어·약어 해석을 함께 진행합니다…")
+                await run_both()                 # 판독이 끝나면 AI 해석 실행을 따로 누르지 않아도 ②코드 후보와 ③용어 해석이 동시에 시작된다
+                prog_detail.set_text("본문에 추가했고, AI 코드 후보와 용어·약어 해석도 끝났습니다.")
             else:
                 prog_title.set_text(f"판독을 중단했습니다 · {took}초" if ocr_cancel["v"] else f"판독 실패 · 0/{total}개 · {took}초")
                 prog_bar.props("color=negative")
@@ -783,41 +805,77 @@ window.kcmSnip=function(){
             rt["ai"], rt["ai_n"] = "done", len(shown)
             render_rbar()
             status.set_text(f"후보 {len(shown)}건" + (f" (정확도 {min_acc}% 미만 {len(codes) - len(shown)}건 숨김)" if len(shown) != len(codes) else ""))
+            render_ai_results()
+
+        def render_ai_results() -> None:
+            """③ AI 코드 후보 — 사용자가 고른 보기(카드형 · 요약 목록)로 그린다"""
+            from .phase3 import add_fav, add_history
+            shown = (st.get("ai_last") or {}).get("codes") or []
+            caution = (st.get("ai_last") or {}).get("caution", "")
+            view = app.storage.user.get("ai_view", "card")
             s, a = current_ctx()
+            out.clear()
+
+            def save_fav(code: str, nm: str) -> None:
+                ui.notify("코드집에 담았습니다." if add_fav(code, nm) else "이미 코드집에 있습니다.")
+
+            def save_hist(code: str, nm: str, conf) -> None:
+                add_history(pii.clean(box.value or "")[:60], code, nm, f"{conf}%", "AI 제안")
+                ui.notify("이력에 기록했습니다.", type="positive")
+
+            def actions(code: str, nm: str, conf, dense: bool) -> None:
+                with ui.row().classes("gap-1 no-wrap"):
+                    sz = "flat round dense size=sm" if dense else "flat round dense"
+                    ui.button(icon="star", on_click=lambda _, code=code, nm=nm: save_fav(code, nm)).props(sz).tooltip("코드집에 담기")
+                    ui.button(icon="history", on_click=lambda _, code=code, nm=nm, conf=conf: save_hist(code, nm, conf)).props(sz).tooltip("이력에 기록")
+                    ui.button(icon="manage_search", on_click=lambda _, code=code: ui.navigate.to(f"/detail?code={code}")).props(sz).tooltip("정밀 분석")
+
             with out:
-                for c in shown:
-                    code = str(c.get("code", "")).strip().upper()
-                    known = names.get(code)
-                    warn = [m for m in (rules.sex_issue(code, s), rules.age_issue(code, a)) if m]
-                    with ui.row().classes("kcm-card w-full items-start no-wrap gap-4"):
-                        ui.label(code).classes("text-lg font-bold").style("min-width:72px;color:var(--accent-hi)")
-                        with ui.column().classes("gap-1 grow"):
-                            ui.label(known or c.get("name_ko", "")).classes("font-semibold")
-                            ui.label(c.get("reason", "")).classes("text-sm text-muted")
-                            if not known:
-                                ui.label("⚠ 상병마스터에 없는 코드입니다 — 직접 확인하세요.").classes("text-sm").style("color:var(--warn)")
-                            for m in warn:
-                                ui.label("⚠ " + m).classes("text-sm").style("color:var(--warn)")
-                        with ui.column().classes("items-end gap-1"):
+                if not shown:
+                    ui.html('<div class="kcm-empty"><span style="font-size:26px">✦</span>‘AI 해석 실행’을 누르면<br>KCD 코드 후보가 여기에 나타납니다.</div>')
+                elif view == "list":
+                    # 요약 목록 — 한 줄에 코드 · 상병명 · 정확도 (근거·경고는 마우스를 올리면 표시)
+                    grid = "display:grid;grid-template-columns:78px minmax(0,1fr) 46px auto;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--color-divider)"
+                    with ui.element("div").classes("w-full text-muted").style(grid + ";font-size:11px;letter-spacing:.06em"):
+                        for h in ("코드", "상병명", "정확도", ""):
+                            ui.label(h)
+                    for c in shown:
+                        code = str(c.get("code", "")).strip().upper()
+                        known = names.get(code)
+                        nm = known or c.get("name_ko", "")
+                        warn = [m for m in (rules.sex_issue(code, s), rules.age_issue(code, a)) if m]
+                        tip = (c.get("reason", "") + ("\n⚠ 상병마스터에 없는 코드입니다 — 직접 확인하세요." if not known else "") + "".join("\n⚠ " + m for m in warn)).strip()
+                        with ui.element("div").classes("w-full").style(grid):
+                            ui.label(code).classes("font-bold mono").style("color:var(--accent-hi)")
+                            with ui.row().classes("items-center gap-1 no-wrap").style("min-width:0"):
+                                ui.label(nm).style("font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap").tooltip(tip or nm)
+                                if c.get("primary"):
+                                    ui.html('<span class="kcm-chip" style="flex:none">주</span>')
+                                if not known or warn:
+                                    ui.icon("warning", color="warning").classes("text-base").tooltip(tip)
                             ui.label(f"{c.get('confidence', 0)}%").classes("font-bold")
-                            if c.get("primary"):
-                                ui.badge("주진단 후보")
-
-                            def save_fav(code=code, known=known, c=c) -> None:
-                                from .phase3 import add_fav
-                                ui.notify("코드집에 담았습니다." if add_fav(code, known or c.get("name_ko", "")) else "이미 코드집에 있습니다.")
-
-                            def save_hist(code=code, known=known, c=c) -> None:
-                                from .phase3 import add_history
-                                add_history(pii.clean(box.value or "")[:60], code, known or c.get("name_ko", ""), f"{c.get('confidence', 0)}%", "AI 제안")
-                                ui.notify("이력에 기록했습니다.", type="positive")
-
-                            with ui.row().classes("gap-1"):
-                                ui.button(icon="star", on_click=save_fav).props("flat round dense").tooltip("코드집에 담기")
-                                ui.button(icon="history", on_click=save_hist).props("flat round dense").tooltip("이력에 기록")
-                                ui.button(icon="manage_search", on_click=lambda _, code=code: ui.navigate.to(f"/detail?code={code}")).props("flat round dense").tooltip("정밀 분석")
-                if res.get("caution"):
-                    ui.label("주의: " + res["caution"]).classes("text-sm text-muted")
+                            actions(code, nm, c.get("confidence", 0), True)
+                else:
+                    for c in shown:
+                        code = str(c.get("code", "")).strip().upper()
+                        known = names.get(code)
+                        warn = [m for m in (rules.sex_issue(code, s), rules.age_issue(code, a)) if m]
+                        with ui.row().classes("kcm-card w-full items-start no-wrap gap-4"):
+                            ui.label(code).classes("text-lg font-bold").style("min-width:72px;color:var(--accent-hi)")
+                            with ui.column().classes("gap-1 grow"):
+                                ui.label(known or c.get("name_ko", "")).classes("font-semibold")
+                                ui.label(c.get("reason", "")).classes("text-sm text-muted")
+                                if not known:
+                                    ui.label("⚠ 상병마스터에 없는 코드입니다 — 직접 확인하세요.").classes("text-sm").style("color:var(--warn)")
+                                for m in warn:
+                                    ui.label("⚠ " + m).classes("text-sm").style("color:var(--warn)")
+                            with ui.column().classes("items-end gap-1"):
+                                ui.label(f"{c.get('confidence', 0)}%").classes("font-bold")
+                                if c.get("primary"):
+                                    ui.badge("주진단 후보")
+                                actions(code, known or c.get("name_ko", ""), c.get("confidence", 0), False)
+                if caution:
+                    ui.label("주의: " + caution).classes("text-sm text-muted")
 
         def print_result() -> None:
             """판독 결과 인쇄 — 본문 · AI 코드 후보 · 용어 해석을 A4 한 문서로 만들어 인쇄창을 연다"""
@@ -836,7 +894,7 @@ window.kcmSnip=function(){
                      f"{f' · {a}세' if a is not None else ''}</p>"]
             if st["docs"]:
                 parts.append("<p class='meta'>첨부 문서: " + e(", ".join(d["name"] for d in st["docs"])) + "</p>")
-            parts.append(f"<h2>판독 본문</h2><pre>{e(text) if text else '(본문 없음)'}</pre>")
+            parts.append(f"<h2>판독 본문 (의학용어·약어 한글 해석 포함)</h2><pre>{terms.annotate_html(text, st['terms']) if text else '(본문 없음)'}</pre>")
             ai = (st.get("ai_last") or {}).get("codes") or []
             if ai:
                 rows = "".join(f"<tr><td class='c'>{e(str(c.get('code', '')))}</td><td>{e(names.get(str(c.get('code', '')).strip().upper()) or str(c.get('name_ko', '')))}</td>"
@@ -853,7 +911,9 @@ window.kcmSnip=function(){
                    "h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:18px 0 6px;padding-bottom:3px;border-bottom:2px solid #333}"
                    ".meta{color:#555;margin:2px 0}pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;border:1px solid #bbb;padding:10px;border-radius:4px}"
                    "table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:4px 6px;vertical-align:top;text-align:left}th{background:#eee}"
-                   "td.c{text-align:center;white-space:nowrap}.foot{margin-top:18px;color:#666;font-size:11px}</style></head><body>" + "".join(parts) + "</body></html>")
+                   "td.c{text-align:center;white-space:nowrap}.foot{margin-top:18px;color:#666;font-size:11px}"
+                   ".kcm-tm{border-bottom:1px dotted #333}.kcm-tm em{font-style:normal;font-weight:700;color:#0b5ea8;margin-left:3px}"
+                   ".kcm-tm em::before{content:'→ '}pre{line-height:1.9}</style></head><body>" + "".join(parts) + "</body></html>")
             # 보이지 않는 틀(iframe)에 문서를 쓰고 인쇄 — 팝업 차단에 걸리지 않는다
             ui.run_javascript(
                 "(function(h){var f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';"

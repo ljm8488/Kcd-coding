@@ -133,7 +133,8 @@ def _one_call(model: str, key: str, body: dict, timeout: float) -> str:
         raise _Fail(502)
 
 
-def generate_race(system: str, parts: list[dict], max_tokens: int = 8192, stagger: float = 5.0, timeout: float = 45.0) -> str:
+def generate_race(system: str, parts: list[dict], max_tokens: int = 8192, stagger: float = 5.0, timeout: float = 45.0,
+                  schema: dict | None = None) -> str:
     """빠른 응답용 — 첫 모델이 느리거나 실패(429·503·시간초과)하면 기다리지 않고 다음 모델을 곧바로 함께 띄워,
     먼저 성공한 답을 쓴다. (한 모델이 몰려 90초씩 걸리던 문제를 피한다)"""
     import concurrent.futures as cf
@@ -142,6 +143,8 @@ def generate_race(system: str, parts: list[dict], max_tokens: int = 8192, stagge
         raise RuntimeError("Gemini API 키가 없습니다. 환경변수 GEMINI_API_KEY를 설정하거나 공용 DB에 기관 키를 등록하세요.")
     body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {"temperature": 0.15, "topP": 0.9, "maxOutputTokens": max_tokens}}
+    if schema:
+        body["generationConfig"].update(responseMimeType="application/json", responseSchema=schema)
     # 글자 옮기기는 큰 모델이 필요 없고 경량 모델이 훨씬 빠르다(실측 2초 안팎 vs 큰 모델 40초 이상) → 경량 모델을 먼저, 큰 모델은 예비
     cand = candidate_models(key)
     lite = [m for m in _live["models"] if "lite" in m] + ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]
@@ -191,7 +194,7 @@ def semantic(query: str) -> dict:
     sysmsg = ("당신은 한국의 보건의료정보관리사이자 해부학·의학용어 전문가입니다. 입력된 검색어(구어·약어·영어 포함)를 "
               "표준 병명으로 해석하고 KCD 코드 후보를 제안합니다. anatomy는 해부학적 부위, type은 질환 유형(예: 골절, 염증, 악성신생물), "
               "synonyms는 검색에 쓸 한국어 관련 표기 3~6개, guide는 코딩 시 유의점 1~3문장. 코드는 KCD 형식(예: S62.6)으로 가능한 세분류까지.")
-    txt = generate(sysmsg, [{"text": f"검색어: {query}"}], SEM_SCHEMA, 2048)
+    txt = generate_race(sysmsg, [{"text": f"검색어: {query}"}], 2048, schema=SEM_SCHEMA)
     return json.loads(txt)
 
 
@@ -206,43 +209,11 @@ def interpret_terms(text: str) -> list[dict]:
               "표준 한글 의학용어로 해석합니다. term 은 본문에 쓰인 표기 그대로, kind 는 '약어' 또는 '용어', meaning 은 표준 한글 용어, "
               "english 는 영문 정식 명칭, note 는 코딩 시 유의점(없으면 빈 문자열). 이미 쉬운 한글로 풀어 쓴 일반 단어는 제외하고 최대 30개. "
               "OCR 오탈자로 보이면 note 에 '판독 오류 가능' 이라고 적으세요. 본문에 없는 용어를 만들지 마세요.")
-    txt = generate(sysmsg, [{"text": "의무기록:\n" + text.strip()[:6000]}], TERMS_SCHEMA, 3072)
+    txt = generate_race(sysmsg, [{"text": "의무기록:\n" + text.strip()[:6000]}], 3072, schema=TERMS_SCHEMA)
     return json.loads(txt).get("terms", [])
 
 
 def suggest(text: str, dept: str = "", purpose: str = "") -> dict:
-    key = api_key()
-    if not key:
-        raise RuntimeError("Gemini API 키가 없습니다. 환경변수 GEMINI_API_KEY를 설정하거나 공용 DB에 기관 키를 등록하세요.")
+    """의무기록 → KCD 코드 후보. 경량 모델을 먼저 쓰고 느리면 다른 모델을 함께 띄워 먼저 끝나는 답을 쓴다(실측 2초 안팎)."""
     ctx = f"진료과: {dept or '전체'}\n코딩 목적: {purpose or '주진단'}\n\n의무기록:\n{text.strip()}"
-    body = {
-        "systemInstruction": {"parts": [{"text": SYSTEM}]},
-        "contents": [{"role": "user", "parts": [{"text": ctx}]}],
-        "generationConfig": {"temperature": 0.15, "topP": 0.9, "maxOutputTokens": 4096,
-                             "responseMimeType": "application/json", "responseSchema": SCHEMA},
-    }
-    last = 0
-    for model in candidate_models(key):
-        for attempt in range(2):
-            try:
-                r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                               headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-                               json=body, timeout=75)
-            except httpx.TimeoutException:
-                last = 504
-                break
-            last = r.status_code
-            if r.is_success:
-                parts = r.json()["candidates"][0]["content"]["parts"]
-                return json.loads("".join(p.get("text", "") for p in parts))
-            if last in (400, 403):
-                raise RuntimeError("Gemini API 키가 유효하지 않거나 요청이 거부되었습니다.")
-            if last == 404:
-                break
-            if last in (429, 500, 503):
-                time.sleep(1.2 if attempt == 0 else 2.5)
-                continue
-            break
-    if last == 429:
-        raise RuntimeError("Gemini 사용량을 잠시 초과했습니다. 1분 후 다시 시도하세요.")
-    raise RuntimeError(f"Gemini 응답 오류 ({last})")
+    return json.loads(generate_race(SYSTEM, [{"text": ctx}], 4096, schema=SCHEMA))
