@@ -203,13 +203,75 @@ TERMS_SCHEMA = {"type": "OBJECT", "properties": {"terms": {"type": "ARRAY", "ite
     "note": {"type": "STRING"}}, "required": ["term", "meaning"]}}}, "required": ["terms"]}
 
 
+_TERMS_SYS = ("당신은 한국의 보건의료정보관리사이자 의학용어 전문가입니다. 의무기록 본문에 쓰인 영어 의학용어·약어·해부학 용어·약품명·시술명·"
+              "검사명·상태 표현을 하나도 빠뜨리지 말고 모두 찾아 표준 한글 의학용어로 해석합니다. "
+              "규칙: (1) term 은 본문에 쓰인 표기 그대로(대소문자·마침표·하이픈 포함)이며 본문의 부분 문자열이어야 합니다. "
+              "(2) 두 단어 이상으로 한 뜻이 되는 표현은 구 전체를 하나의 term 으로 하세요 "
+              "(예: 'renal artery'→신동맥, 'general condition poor'→전신 상태 불량, 'epi injection'→에피네프린 주입, 'S-colon'→S상 결장, "
+              "'temporoparietal area'→측두두정부, 'multiple fx.'→다발성 골절). "
+              "(3) 좌/우(Lt, Rt), 부위, 증상, 소견(melena, Hb 저하), 질환, 약, 시술(PCI, hemoclipping), 검사 수치 항목(Hb, CRP, Cr)도 모두 포함합니다. "
+              "(4) kind 는 '약어' 또는 '용어', meaning 은 표준 한글 용어(번역투 말고 임상에서 쓰는 말), english 는 영문 정식 명칭, "
+              "note 는 코딩 시 유의점(없으면 빈 문자열). (5) and·in·with 같은 일반 영어 단어와 이미 한글로 풀어 쓴 말은 제외합니다. "
+              "(6) OCR 오탈자로 보이면 note 에 '판독 오류 가능'. 본문에 없는 용어는 만들지 마세요. 최대 80개.")
+
+
+def _chunks(text: str, n: int = 1800) -> list[str]:
+    out, cur = [], ""
+    for line in text.splitlines(keepends=True):
+        if cur and len(cur) + len(line) > n:
+            out.append(cur)
+            cur = ""
+        cur += line
+        while len(cur) > n * 1.5:                      # 줄바꿈이 없는 긴 글은 문장 끝에서 자른다
+            cut = max(cur.rfind(". ", 0, n), cur.rfind("다. ", 0, n), n - 1)
+            out.append(cur[:cut + 1])
+            cur = cur[cut + 1:]
+    if cur.strip():
+        out.append(cur)
+    return out
+
+
 def interpret_terms(text: str) -> list[dict]:
-    """의무기록에서 의학용어 · 약어를 찾아 표준 한글 용어로 해석한다 (판독 결과의 약어 풀이)."""
-    sysmsg = ("당신은 한국의 보건의료정보관리사이자 의학용어 전문가입니다. 의무기록 본문에서 의학용어와 약어(영문 약어·기호 포함)를 찾아 "
-              "표준 한글 의학용어로 해석합니다. term 은 본문에 쓰인 표기 그대로, kind 는 '약어' 또는 '용어', meaning 은 표준 한글 용어, "
-              "english 는 영문 정식 명칭, note 는 코딩 시 유의점(없으면 빈 문자열). 이미 쉬운 한글로 풀어 쓴 일반 단어는 제외하고 최대 30개. "
-              "OCR 오탈자로 보이면 note 에 '판독 오류 가능' 이라고 적으세요. 본문에 없는 용어를 만들지 마세요.")
-    txt = generate_race(sysmsg, [{"text": "의무기록:\n" + text.strip()[:6000]}], 3072, schema=TERMS_SCHEMA)
+    """의무기록에서 의학용어 · 약어를 찾아 표준 한글 용어로 해석한다. 긴 글은 나눠서 동시에 처리해 빠짐이 없게 한다."""
+    import concurrent.futures as cf
+    chunks = _chunks(text.strip()[:12000])
+    if not chunks:
+        return []
+
+    def one(ch: str) -> list[dict]:
+        txt = generate_race(_TERMS_SYS, [{"text": "의무기록:\n" + ch}], 4096, schema=TERMS_SCHEMA)
+        return json.loads(txt).get("terms", [])
+
+    out: list[dict] = []
+    err: Exception | None = None
+    with cf.ThreadPoolExecutor(max_workers=min(4, len(chunks))) as ex:
+        for f in [ex.submit(one, c) for c in chunks]:
+            try:
+                out += f.result()
+            except Exception as e:  # noqa: BLE001
+                err = e
+    if not out and err:
+        raise err
+    seen, uniq = set(), []
+    for r in out:
+        k = str(r.get("term", "")).strip().lower()
+        if k and k not in seen:
+            seen.add(k)
+            uniq.append(r)
+    return uniq
+
+
+def interpret_phrases(phrases: list[str], context: str = "") -> list[dict]:
+    """1차에서 빠진 영어 표현만 따로 모아 다시 해석한다 (2차 보완)"""
+    items = [p for p in phrases if p.strip()][:70]
+    if not items:
+        return []
+    sysmsg = ("당신은 한국의 보건의료정보관리사이자 의학용어 전문가입니다. 아래 영어 표현 목록은 의무기록에서 뽑은 것입니다. "
+              "각 항목을 표준 한글 의학용어로 해석하세요. 한 항목에 의학용어가 여러 개 섞여 있으면 의학용어 단위로 쪼개 각각 term 으로 돌려주세요"
+              "(term 은 항목 안의 부분 문자열 그대로). 의학과 무관한 일반 영어 단어(접속사·관사 등)는 제외합니다. "
+              "kind 는 '약어' 또는 '용어', meaning 은 임상에서 쓰는 한글 용어, english 는 영문 정식 명칭, note 는 유의점(없으면 빈 문자열).")
+    ctx = ("참고 문맥:\n" + context.strip()[:1500] + "\n\n") if context.strip() else ""
+    txt = generate_race(sysmsg, [{"text": ctx + "영어 표현 목록:\n" + "\n".join(f"- {p}" for p in items)}], 4096, schema=TERMS_SCHEMA)
     return json.loads(txt).get("terms", [])
 
 

@@ -15,11 +15,25 @@ MED_ABBR = {
   "sob":"호흡곤란","doe":"운동시 호흡곤란","loc":"의식소실","rta":"교통사고","ta":"교통사고",
   "hcc":"간세포암","rcc":"신세포암","nsclc":"비소세포폐암","sclc":"소세포폐암","gbm":"교모세포종",
   "pe":"폐색전증","dvt":"심부정맥혈전증","pvd":"말초혈관질환","pad":"말초동맥질환",
-  "uti":"요로감염","apn":"급성 신우신염","bph":"전립선비대증","gerd":"위식도역류병","ibs":"과민성대장증후군"
+  "uti":"요로감염","apn":"급성 신우신염","bph":"전립선비대증","gerd":"위식도역류병","ibs":"과민성대장증후군",
+  # 자주 쓰는 진료기록 약어 (정확한 표준 용어만)
+  "esrd":"말기 신장병(말기 신부전)","ckd":"만성 신장병","hd":"혈액투석","pd":"복막투석","crrt":"지속적 신대체요법",
+  "nstemi":"비ST분절상승 심근경색증","stemi":"ST분절상승 심근경색증","mi":"심근경색증","pci":"경피적 관상동맥 중재술",
+  "cabg":"관상동맥 우회로 이식술","chf":"울혈성 심부전","af":"심방세동","dm":"당뇨병","htn":"고혈압","copd":"만성 폐쇄성 폐질환",
+  "tb":"결핵","cva":"뇌혈관 사고(뇌졸중)","tia":"일과성 허혈 발작","ami":"급성 심근경색증","ihd":"허혈성 심장질환",
+  "crp":"C-반응단백","wbc":"백혈구","rbc":"적혈구","hb":"혈색소","hct":"헤마토크릿","plt":"혈소판","bun":"혈액요소질소","cr":"크레아티닌",
+  "gfr":"사구체 여과율","lft":"간기능검사","ast":"아스파르테이트 아미노전이효소","alt":"알라닌 아미노전이효소","pt":"프로트롬빈 시간",
+  "icu":"중환자실","er":"응급실","opd":"외래","npo":"금식","iv":"정맥 주사","im":"근육 주사","po":"경구","prn":"필요시","bid":"하루 2회",
+  "tid":"하루 3회","qid":"하루 4회","qd":"하루 1회","ct":"전산화단층촬영","mri":"자기공명영상","ekg":"심전도","ecg":"심전도",
+  "egd":"식도위십이지장내시경","cfs":"대장내시경","ercp":"내시경적 역행성 담췌관조영술","ptbd":"경피경간 담도배액술",
+  "gcs":"글래스고 혼수척도","spo2":"산소포화도","bp":"혈압","hr":"심박수","rr":"호흡수","bt":"체온","dnr":"심폐소생술 거부",
+  "c/w":"~와 일치","w/u":"정밀 검사","p/o":"수술 후","h/o":"병력","n/v":"오심·구토","uri":"상기도 감염","hbv":"B형 간염 바이러스",
+  "hcv":"C형 간염 바이러스","hiv":"인체면역결핍바이러스","fn":"발열성 호중구감소증","ards":"급성 호흡곤란증후군","sirs":"전신 염증 반응 증후군"
 }
 
 # 약어 중 일반 영단어와 겹치는 것 — 대문자로 쓰인 경우에만 약어로 본다
-AMBIG = {"both", "mass", "ext", "le", "ue", "op", "dx", "hx", "tx", "sx", "ta", "bil", "rt", "lt", "ca", "tu"}
+AMBIG = {"both", "mass", "ext", "le", "ue", "op", "dx", "hx", "tx", "sx", "ta", "bil", "rt", "lt", "ca", "tu",
+         "mi", "af", "tb", "er", "iv", "im", "po", "pt", "ct", "bp", "hr", "rr", "bt", "cr", "hd", "pd", "fn", "ast", "alt", "plt", "ihd"}
 _TOKEN = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]{1,12}(?:/[A-Za-z]{1,6})?\.?)(?![A-Za-z0-9])")
 
 
@@ -144,6 +158,48 @@ def annotate_html(text: str, rows: list[dict]) -> str:
         pos = m.end()
     out.append(_h.escape(text[pos:]))
     return "".join(out)
+
+
+_RES_STOP = {"and", "or", "in", "on", "at", "of", "the", "to", "for", "by", "from", "with", "without", "is", "are", "was", "were", "be", "been",
+             "no", "not", "a", "an", "as", "due", "but", "then", "than", "that", "this", "these", "those", "there", "its", "it", "cm", "mm", "kg", "mg",
+             "ml", "mmhg", "bpm", "etc", "see", "per", "x", "vs", "or", "both", "also", "after", "before", "during", "about", "which", "while"}
+_RES_RUN = re.compile(r"[A-Za-z][A-Za-z0-9'./\-]*(?:[ \t]+[A-Za-z][A-Za-z0-9'./\-]*)*")
+
+
+def appears(term: str, text: str) -> bool:
+    """AI가 돌려준 용어가 실제로 본문에 있는지(대소문자·공백 차이 허용) — 없는 용어를 지어내는 것을 거른다"""
+    t = re.sub(r"\s+", " ", term.strip().lower())
+    return bool(t) and t in re.sub(r"\s+", " ", (text or "").lower())
+
+
+def residual_english(text: str, rows: list[dict], limit: int = 70) -> list[str]:
+    """이미 해석된 용어를 뺀 뒤에도 본문에 남은 영어 표현(구 단위) — 2차로 AI에게 빠짐없이 해석시키기 위한 목록"""
+    if not text:
+        return []
+    covered = [r["term"] for r in rows or [] if r.get("term") and r.get("meaning")]
+    masked = text
+    for t in sorted(covered, key=len, reverse=True):
+        e = re.escape(t.strip())
+        pat = (r"(?<![A-Za-z0-9])" + e + r"(?![A-Za-z0-9])") if re.fullmatch(r"[A-Za-z0-9 .\-/']+", t.strip()) else e
+        masked = re.sub(pat, lambda m: "\x00" * len(m.group(0)), masked, flags=re.I)
+    out: list[str] = []
+    seen = set()
+    for m in _RES_RUN.finditer(masked):
+        words = [w for w in re.split(r"\s+", m.group(0)) if w]
+        while words and words[0].lower().strip(".") in _RES_STOP:
+            words.pop(0)
+        while words and words[-1].lower().strip(".") in _RES_STOP:
+            words.pop()
+        if not words:
+            continue
+        phrase = " ".join(words)
+        if len(phrase) < 2 or re.fullmatch(r"[A-Za-z]", phrase) or phrase.lower() in seen:
+            continue
+        seen.add(phrase.lower())
+        out.append(phrase)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def merge(local: list[dict], ai: list[dict]) -> list[dict]:

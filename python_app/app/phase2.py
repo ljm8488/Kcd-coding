@@ -479,8 +479,7 @@ window.kcmSnip=function(){
                                           "검사: 흉부 X-ray 우하엽 폐렴\n"
                                           "치료경과: 항생제 투여 후 호전\n"
                                           "최종진단: 폐렴, 고혈압, 당뇨병") \
-                    .props("outlined input-style='min-height:210px;max-height:210px;"
-                           "resize:none;font-size:15px;line-height:1.7'").classes("w-full")
+                    .props("outlined input-style='resize:none;font-size:15px;line-height:1.7'").classes("w-full kcm-tarea")
                 with ui.row().classes("gap-2 w-full no-wrap"):
                     btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow").style("white-space:nowrap;min-width:0")
                     ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline").style("white-space:nowrap;flex:none")
@@ -501,12 +500,21 @@ window.kcmSnip=function(){
 .kcm-err{font-size:12px;color:var(--warn);font-weight:600}""")
         rt = {"ai": "idle", "terms": "idle", "ai_n": 0, "terms_n": 0}
         ui.add_css(
-            ".kcm-split{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:start;width:100%}"
+            # 큰 화면: 세 칸이 같은 높이(화면에 맞춤)로 나란히 — 입력창과 결과 영역이 칸 안을 가득 채우고 넘치면 칸 안에서만 스크롤
+            ".kcm-split{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:stretch;width:100%;"
+            "height:calc(100vh / var(--z, 1) - 330px);min-height:540px}"
+            ".kcm-split>*{min-height:0;display:flex;flex-direction:column}"
+            ".kcm-split .kcm-scroll{flex:1 1 0;min-height:0;max-height:none}"
+            ".kcm-inputcol>.kcm-card{flex:1 1 0;min-height:0}"
+            ".kcm-tarea{flex:1 1 0;min-height:140px;display:flex}"
+            ".kcm-tarea .q-field__inner,.kcm-tarea .q-field__control{height:100%!important}"
+            ".kcm-tarea textarea{height:100%!important;max-height:none!important;min-height:0!important;resize:none}"
             ".kcm-docview{white-space:pre-wrap;word-break:break-word;font-size:15px;line-height:2.05;padding:4px 2px}"
             ".kcm-tm{border-bottom:1.5px dotted var(--color-accent);white-space:normal}"
             ".kcm-tm em{font-style:normal;font-weight:700;font-size:.88em;color:var(--color-accent);background:var(--a100);border-radius:4px;padding:0 5px;margin:0 2px 0 4px;white-space:nowrap}"
             ".kcm-tm em::before{content:'→ '}"
-            "@media (max-width:1450px){.kcm-split{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.kcm-split>.kcm-inputcol{grid-column:1/-1}}"
+            "@media (max-width:1450px){.kcm-split{grid-template-columns:minmax(0,1fr) minmax(0,1fr);height:auto;min-height:0}"
+            ".kcm-split>.kcm-inputcol{grid-column:1/-1}.kcm-split .kcm-scroll{flex:none;max-height:62vh;min-height:260px}.kcm-tarea{min-height:190px}}"
             "@media (max-width:820px){.kcm-split{grid-template-columns:minmax(0,1fr)}}"
             ".kcm-note1{font-size:13px;line-height:1.55;color:var(--color-text);opacity:.82}"
             ".kcm-step{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--color-accent);color:#fff;"
@@ -658,8 +666,18 @@ window.kcmSnip=function(){
             terms_status.set_text("내장 사전으로 해석했습니다. AI가 나머지 의학용어를 해석하는 중입니다…")
             render_terms()
             try:
-                ai = await run.io_bound(gemini.interpret_terms, text)
-                st["terms"] = terms.merge(local, ai)
+                ai = [a for a in await run.io_bound(gemini.interpret_terms, text) if terms.appears(str(a.get("term", "")), text)]
+                merged = terms.merge(local, ai)
+                # 2차 보완 — 1차에서 해석되지 않고 남은 영어 표현만 모아 다시 해석시킨다 (누락 방지)
+                rest = terms.residual_english(text, merged)
+                if rest:
+                    terms_status.set_text(f"1차 해석 {len(merged)}건 — 남은 영어 표현 {len(rest)}개를 보완 해석하는 중…")
+                    try:
+                        more = [a for a in await run.io_bound(gemini.interpret_phrases, rest, text) if terms.appears(str(a.get("term", "")), text)]
+                        merged = terms.merge(merged, more)
+                    except Exception:  # noqa: BLE001
+                        pass                       # 보완 실패해도 1차 결과는 그대로 쓴다
+                st["terms"] = merged
                 terms_status.set_text(f"해석 {len(st['terms'])}건 — 내장 사전 {sum(1 for r in st['terms'] if r['src'] == '내장 사전')}건 · AI {sum(1 for r in st['terms'] if r['src'] == 'AI')}건")
                 rt["terms"] = "done"
             except Exception as ex:  # noqa: BLE001
