@@ -58,4 +58,4 @@ def read_document(name: str, data: bytes, mime: str, engine: str = "gemini", vis
     hint = {"ko": "한국어 문서입니다.", "en": "영어 문서입니다."}.get(lang, "한국어와 영어가 섞여 있을 수 있습니다.")
     parts = [{"inlineData": {"mimeType": mime, "data": base64.b64encode(data).decode()}},
              {"text": f"위 문서의 글자를 모두 옮겨 적으세요. {hint}"}]
-    return gemini.generate(SYS, parts, None, 8192).strip()
+    return gemini.generate_race(SYS, parts, 8192).strip()

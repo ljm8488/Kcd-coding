@@ -113,6 +113,64 @@ def generate(system: str, parts: list[dict], schema: dict | None = None, max_tok
     raise RuntimeError(f"Gemini 응답 오류 ({last})")
 
 
+class _Fail(Exception):
+    def __init__(self, status: int) -> None:
+        super().__init__(status)
+        self.status = status
+
+
+def _one_call(model: str, key: str, body: dict, timeout: float) -> str:
+    try:
+        r = httpx.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                       headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body, timeout=timeout)
+    except httpx.HTTPError:
+        raise _Fail(504)
+    if not r.is_success:
+        raise _Fail(r.status_code)
+    try:
+        return "".join(p.get("text", "") for p in r.json()["candidates"][0]["content"]["parts"])
+    except (KeyError, IndexError, ValueError):
+        raise _Fail(502)
+
+
+def generate_race(system: str, parts: list[dict], max_tokens: int = 8192, stagger: float = 5.0, timeout: float = 45.0) -> str:
+    """빠른 응답용 — 첫 모델이 느리거나 실패(429·503·시간초과)하면 기다리지 않고 다음 모델을 곧바로 함께 띄워,
+    먼저 성공한 답을 쓴다. (한 모델이 몰려 90초씩 걸리던 문제를 피한다)"""
+    import concurrent.futures as cf
+    key = api_key()
+    if not key:
+        raise RuntimeError("Gemini API 키가 없습니다. 환경변수 GEMINI_API_KEY를 설정하거나 공용 DB에 기관 키를 등록하세요.")
+    body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"temperature": 0.15, "topP": 0.9, "maxOutputTokens": max_tokens}}
+    # 글자 옮기기는 큰 모델이 필요 없고 경량 모델이 훨씬 빠르다(실측 2초 안팎 vs 큰 모델 40초 이상) → 경량 모델을 먼저, 큰 모델은 예비
+    cand = candidate_models(key)
+    lite = [m for m in _live["models"] if "lite" in m] + ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]
+    models = list(dict.fromkeys(lite + cand))[:5]
+    ex = cf.ThreadPoolExecutor(max_workers=len(models))
+    pending: set = set()
+    nxt, last = 0, 0
+    end = time.time() + timeout + stagger * len(models)
+    try:
+        while (nxt < len(models) or pending) and time.time() < end:
+            if nxt < len(models):
+                pending.add(ex.submit(_one_call, models[nxt], key, body, timeout))
+                nxt += 1
+            done, pending = cf.wait(pending, timeout=stagger if nxt < len(models) else max(1.0, end - time.time()),
+                                    return_when=cf.FIRST_COMPLETED)
+            for f in done:
+                try:
+                    return f.result()
+                except _Fail as e:
+                    last = e.status
+                    if last in (400, 403):
+                        raise RuntimeError("Gemini 요청이 거부되었습니다 (키 또는 파일 형식·크기를 확인하세요).")
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    if last == 429:
+        raise RuntimeError("Gemini 사용량을 잠시 초과했습니다. 1분 후 다시 시도하세요.")
+    raise RuntimeError(f"Gemini 응답 오류 ({last or 504}) — 서비스가 혼잡합니다. 잠시 후 다시 시도하세요.")
+
+
 SEM_SCHEMA = {
     "type": "OBJECT",
     "properties": {
