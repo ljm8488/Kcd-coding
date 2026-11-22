@@ -53,6 +53,26 @@ PDF_JS = """(async function(h,fname){
   finally{ if(wrap) wrap.remove(); }
 })"""
 
+# 인쇄 창 이동 — 제목줄(.kcm-printhead)을 끌면 창(.kcm-printdlg)이 따라 움직인다 (화면 밖으로 나가지 않게 일부는 항상 보이게)
+PRINT_DRAG_JS = """(function(){
+  function zoom(){return parseFloat(getComputedStyle(document.body).zoom)||1;}
+  function anchor(c){ if(c.dataset.anch) return; var r=c.getBoundingClientRect(), z=zoom(); c.dataset.anch=1;
+    c.style.position='fixed'; c.style.margin='0'; c.style.left=(r.left/z)+'px'; c.style.top=(r.top/z)+'px'; }
+  if(!window.__kcmDrag){ window.__kcmDrag=1; var d=null;
+    document.addEventListener('pointerdown',function(e){
+      var h=e.target.closest&&e.target.closest('.kcm-printhead'); if(!h||e.button!==0) return;
+      var c=h.closest('.kcm-printdlg'); if(!c) return; anchor(c);
+      var r=c.getBoundingClientRect(); d={c:c,dx:e.clientX-r.left,dy:e.clientY-r.top}; e.preventDefault();
+    },true);
+    document.addEventListener('pointermove',function(e){
+      if(!d) return; var z=zoom(), w=d.c.getBoundingClientRect().width;
+      var x=Math.max(60-w,Math.min(innerWidth-60,e.clientX-d.dx)), y=Math.max(0,Math.min(innerHeight-40,e.clientY-d.dy));
+      d.c.style.left=(x/z)+'px'; d.c.style.top=(y/z)+'px';
+    },true);
+    document.addEventListener('pointerup',function(){d=null;},true);
+  }
+  var c=document.querySelector('.kcm-printdlg'); if(c) anchor(c);
+})()"""
 DEPTS = ["전체 진료과", "내과", "순환기내과", "신경과", "호흡기내과", "정형외과", "외과", "응급의학과", "가정의학과"]
 PURPOSES = ["주진단", "부진단", "외래 청구", "사망원인"]
 VERS = ["KCD 8차", "KCD 7차"]
@@ -971,6 +991,7 @@ window.kcmSnip=function(){
             "resize:both;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:18px}"
             ".q-dialog__inner--minimized>.kcm-printdlg{max-width:98vw!important}"
             ".kcm-printbody{flex:1 1 0;min-height:0}"
+            ".kcm-printhead{cursor:move;user-select:none;touch-action:none}"
             ".kcm-printprev{flex:1 1 520px;min-width:300px;border:1px solid var(--color-divider);border-radius:8px;background:#fff;align-self:stretch;height:auto}")
 
         def export_ctx(sel: dict) -> dict:
@@ -999,9 +1020,9 @@ window.kcmSnip=function(){
             has_ai = bool((st.get("ai_last") or {}).get("codes"))
             # no-backdrop-dismiss: 크기를 끌다가 창 밖에서 마우스를 놓아도 창이 닫히지 않게 한다 (닫기: 취소 · Esc)
             with ui.dialog().props("no-backdrop-dismiss") as dlg, ui.card().classes("kcm-printdlg"):
-                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                with ui.row().classes("w-full items-center justify-between no-wrap kcm-printhead").props('title="제목줄을 끌어 창을 옮길 수 있습니다"'):
                     ui.label("인쇄 · 미리보기 · 내려받기").style("font-family:var(--font-heading);font-weight:700;font-size:18px")
-                    ui.label("↘ 오른쪽 아래 모서리를 끌어 창 크기를 바꿀 수 있습니다").classes("text-muted").style("font-size:11.5px")
+                    ui.label("↔ 제목줄을 끌면 창 이동 · ↘ 오른쪽 아래 모서리를 끌면 크기 조절").classes("text-muted").style("font-size:11.5px")
                 with ui.row().classes("w-full no-wrap items-stretch gap-4 kcm-printbody"):
                     with ui.column().classes("gap-1").style("flex:0 0 270px;min-width:230px;overflow:auto"):
                         ui.label("내보낼 칸을 고르세요. 오른쪽 미리보기에 바로 반영됩니다.").classes("text-muted").style("font-size:12px")
@@ -1084,10 +1105,9 @@ window.kcmSnip=function(){
                         ui.button("취소", on_click=dlg.close).props("flat no-caps")
                         ui.button("인쇄", icon="print", on_click=go_print).props("unelevated color=primary no-caps")
             dlg.open()
-            # 크기를 끌어 바꿀 때 창이 가운데 기준으로 튀지 않도록, 열린 자리에 고정(왼쪽·위 기준)한다
-            ui.timer(0.5, lambda: ui.run_javascript(
-                "(function(){var c=document.querySelector('.kcm-printdlg');if(!c||c.dataset.anch)return;var r=c.getBoundingClientRect();c.dataset.anch=1;"
-                "c.style.position='fixed';c.style.left=r.left+'px';c.style.top=r.top+'px';c.style.margin='0';})()"), once=True)
+            # 창 이동(제목줄 끌기) · 크기 조절이 가운데 기준으로 튀지 않도록, 열린 자리에 왼쪽·위 기준으로 고정한다.
+            # 화면 크기 설정(body zoom)이 1이 아니어도 위치가 어긋나지 않게 zoom 으로 나눠 적용한다.
+            ui.timer(0.5, lambda: ui.run_javascript(PRINT_DRAG_JS), once=True)
 
         async def on_text_change(_=None) -> None:
             """본문에 영어·의학용어가 있으면 알아서 한글로 해석한다 — 멈추면 먼저 내장 사전·KCD 영문명으로 즉시, 영어가 있으면 이어서 AI로 나머지까지"""
