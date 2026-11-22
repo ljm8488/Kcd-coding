@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 
 import httpx
@@ -263,6 +264,49 @@ def interpret_terms(text: str) -> list[dict]:
             seen.add(k)
             uniq.append(r)
     return uniq
+
+
+_TR_SCHEMA = {"type": "OBJECT", "properties": {"lines": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+    "i": {"type": "INTEGER"}, "ko": {"type": "STRING"}}, "required": ["i", "ko"]}}}, "required": ["lines"]}
+
+
+def translate_lines(lines: list[str], glossary: list[tuple[str, str]] | None = None) -> dict[int, str]:
+    """의무기록 줄 단위 한글 번역 — {줄 번호: 한글 문장}. 이미 한글뿐인 줄은 돌려주지 않는다. 긴 글은 나눠서 동시에 처리."""
+    import concurrent.futures as cf
+    todo = [(i, l) for i, l in enumerate(lines) if l.strip() and re.search(r"[A-Za-z]{2,}", l)]
+    if not todo:
+        return {}
+    sysmsg = ("당신은 한국 병원의 의무기록 번역가입니다. 번호가 붙은 의무기록 줄을 자연스러운 한국어 임상 문장으로 옮기세요. "
+              "의학용어·약어는 임상에서 쓰는 표준 한글 의학용어로(예: ESRD→말기 신장병, HD→혈액투석, s/p→시행 후, R/O→감별 필요, h/o→병력), "
+              "좌/우(Lt/Rt)·부위·수치·단위·날짜는 정확히 유지하세요. 줄머리의 '#.' '-' 같은 기호와 번호는 빼도 됩니다. "
+              "원문에 없는 내용을 더하거나 추측하지 말고, 모르는 약어는 그대로 두세요. 입력의 i 와 같은 번호로 돌려주고, 한글뿐인 줄은 생략하세요.")
+    size = 25
+    chunks = [todo[k:k + size] for k in range(0, len(todo), size)]
+
+    def one(ch: list[tuple[int, str]]) -> dict[int, str]:
+        body = "\n".join(f"{i}\t{l.strip()}" for i, l in ch)
+        gl = ""
+        if glossary:      # 앞에서 해석한 용어는 같은 번역어를 쓰게 해 ②칸의 용어 해석과 어긋나지 않게 한다
+            gl = "용어집(이 번역어를 우선 사용):\n" + "\n".join(f"- {t} = {m}" for t, m in glossary[:80]) + "\n\n"
+        txt = generate_race(sysmsg, [{"text": gl + "줄 목록(번호<TAB>원문):\n" + body}], 4096, schema=_TR_SCHEMA)
+        got = {}
+        valid = {i for i, _ in ch}
+        for r in json.loads(txt).get("lines", []):
+            if int(r.get("i", -1)) in valid and str(r.get("ko", "")).strip():
+                got[int(r["i"])] = str(r["ko"]).strip()
+        return got
+
+    out: dict[int, str] = {}
+    err: Exception | None = None
+    with cf.ThreadPoolExecutor(max_workers=min(4, len(chunks))) as ex:
+        for f in [ex.submit(one, c) for c in chunks]:
+            try:
+                out.update(f.result())
+            except Exception as e:  # noqa: BLE001
+                err = e
+    if not out and err:
+        raise err
+    return out
 
 
 def interpret_phrases(phrases: list[str], context: str = "") -> list[dict]:

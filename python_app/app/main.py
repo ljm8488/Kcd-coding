@@ -207,7 +207,7 @@ NAV_GROUPS = [("조회", ["search", "index", "nlp"]), ("내 작업", ["history",
 SCOPE_SHORT = {"sysadmin": "시스템 전체 관리", "orgadmin": "소속 기관 관리", "user": "시스템 사용"}
 
 
-UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols", "nav_groups", "nav_items", "nav_collapsed", "nav_mini", "ai_view")
+UI_PREF_KEYS = ("dark", "zoom", "panel_order", "panel_mode", "panel_show", "panel_wide", "panel_h", "panel_cols", "nav_groups", "nav_items", "nav_collapsed", "nav_mini", "ai_view", "doc_view")
 
 
 def load_ui_pref() -> None:

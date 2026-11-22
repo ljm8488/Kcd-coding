@@ -170,6 +170,101 @@ def annotate_html(text: str, rows: list[dict]) -> str:
     return "".join(out)
 
 
+def _has_batchim(ch: str) -> bool | None:
+    if "가" <= ch <= "힣":
+        return (ord(ch) - 0xAC00) % 28 != 0
+    return None
+
+
+def _ends_with_rieul(ch: str) -> bool:
+    return "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 == 8
+
+
+_JOSA_PAIRS = (("으로", "로"), ("을", "를"), ("은", "는"), ("이", "가"), ("과", "와"))
+
+
+def _fix_josa(prev_word: str, s: str) -> str:
+    """용어를 한글 뜻으로 바꾼 뒤 이어지는 조사를 받침에 맞게 고친다 — 예) 욕창를 → 욕창을, 혈액투석가 → 혈액투석이"""
+    if not prev_word or not s:
+        return s
+    b = _has_batchim(prev_word[-1])
+    if b is None:
+        return s
+    for with_b, without_b in _JOSA_PAIRS:
+        for cand in (with_b, without_b):
+            if s.startswith(cand) and (len(s) == len(cand) or not ("가" <= s[len(cand)] <= "힣")):
+                if with_b == "으로":
+                    want = without_b if (not b or _ends_with_rieul(prev_word[-1])) else with_b
+                else:
+                    want = with_b if b else without_b
+                return want + s[len(cand):]
+    return s
+
+
+def substitute_line(line: str, rows: list[dict]) -> str:
+    """한 줄의 용어·약어를 한글 뜻으로 바꿔 쓴 줄(AI 없이 즉시). 바뀐 것이 없으면 빈 문자열."""
+    segs = annotate_segments(line, rows)
+    out, prev, changed = [], "", False
+    for seg, r in segs:
+        if r is None:
+            out.append(_fix_josa(prev, seg) if prev else seg)
+            prev = ""
+        else:
+            prev = str(r["meaning"])
+            out.append(prev)
+            changed = True
+    return "".join(out) if changed else ""
+
+
+def doc_pairs(text: str, rows: list[dict], tr_map: dict | None = None) -> list[dict]:
+    """줄 단위 (원문, 한글 해석) 짝 — AI 번역이 있으면 그것을, 없으면 용어 치환 줄을 쓴다."""
+    out = []
+    for i, line in enumerate((text or "").split("\n")):
+        ai = (tr_map or {}).get(i, "")
+        g = ai or substitute_line(line, rows)
+        g = re.sub(r"^\s*(#\.|[-•*])\s*", "", g)           # 줄머리 기호(#. · -)는 해석 줄에서 뺀다
+        if g.strip() == re.sub(r"^\s*(#\.|[-•*])\s*", "", line).strip():
+            g = ""
+        out.append({"o": line, "g": g, "ai": bool(ai)})
+    return out
+
+
+def pairs_html(pairs: list[dict], mode: str) -> str:
+    """mode: 'lines'(원문 아래 해석) · 'side'(좌우 비교)"""
+    import html as _h
+    e = _h.escape
+    if mode == "side":
+        rows = ['<div class="kcm-sd kcm-sd-h"><div>원문</div><div>한글 해석</div></div>']
+        for p in pairs:
+            if not p["o"].strip():
+                rows.append('<div class="kcm-sd-sp"></div>')
+                continue
+            tag = '<span class="kcm-aitag">AI</span>' if p["ai"] else ""
+            rows.append(f'<div class="kcm-sd"><div class="o">{e(p["o"])}</div><div class="g">{tag}{e(p["g"]) if p["g"] else "—"}</div></div>')
+        return "".join(rows)
+    rows = []
+    for p in pairs:
+        if not p["o"].strip():
+            rows.append('<div class="kcm-ln-sp"></div>')
+            continue
+        g = ""
+        if p["g"]:
+            tag = '<span class="kcm-aitag">AI</span>' if p["ai"] else ""
+            g = f'<div class="g">→ {tag}{e(p["g"])}</div>'
+        rows.append(f'<div class="kcm-ln"><div class="o">{e(p["o"])}</div>{g}</div>')
+    return "".join(rows)
+
+
+def pairs_plain(pairs: list[dict]) -> str:
+    """파일(Excel · 한글)용 — 원문 줄 아래에 ‘→ 해석’ 줄"""
+    out = []
+    for p in pairs:
+        out.append(p["o"])
+        if p["g"]:
+            out.append("   → " + ("[AI] " if p["ai"] else "") + p["g"])
+    return "\n".join(out)
+
+
 def annotate_plain(text: str, rows: list[dict]) -> str:
     """파일(Excel · 한글)용 글자만 — 예) HTN[→고혈압]"""
     return "".join(seg if r is None else f"{seg}[→{r['meaning']}]" for seg, r in annotate_segments(text, rows))

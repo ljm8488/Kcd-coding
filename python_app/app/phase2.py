@@ -555,6 +555,16 @@ window.kcmSnip=function(){
             ".kcm-tm{border-bottom:1.5px dotted var(--color-accent);white-space:normal}"
             ".kcm-tm em{font-style:normal;font-weight:700;font-size:.88em;color:var(--color-accent);background:var(--a100);border-radius:4px;padding:0 5px;margin:0 2px 0 4px;white-space:nowrap}"
             ".kcm-tm em::before{content:'→ '}"
+            # 줄 아래 · 좌우 비교 보기 — 원문은 그대로, 해석 줄은 연한 강조색
+            ".kcm-docview:has(.kcm-ln),.kcm-docview:has(.kcm-sd){white-space:normal}"
+            ".kcm-ln{margin:0 0 10px}.kcm-ln .o{white-space:pre-wrap;line-height:1.7}"
+            ".kcm-ln .g{white-space:pre-wrap;line-height:1.65;font-size:.93em;color:var(--color-accent);font-weight:600;padding:1px 0 1px 12px;margin-top:2px;border-left:3px solid var(--a300)}"
+            ".kcm-ln-sp,.kcm-sd-sp{height:10px}"
+            ".kcm-sd{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;padding:6px 0;border-bottom:1px solid var(--color-divider)}"
+            ".kcm-sd-h{font-size:11px;letter-spacing:.06em;color:var(--muted);font-weight:700;position:sticky;top:-4px;background:var(--surface);z-index:1}"
+            ".kcm-sd .o{white-space:pre-wrap;line-height:1.7;font-size:14px}"
+            ".kcm-sd .g{white-space:pre-wrap;line-height:1.7;font-size:14px;color:var(--color-accent);font-weight:600}"
+            ".kcm-aitag{display:inline-block;font-size:10px;font-weight:800;color:#fff;background:var(--color-accent);border-radius:4px;padding:0 4px;margin-right:5px;vertical-align:1px}"
             "@media (max-width:1450px){.kcm-split{grid-template-columns:minmax(0,1fr) minmax(0,1fr);height:auto;min-height:0}"
             ".kcm-split>.kcm-inputcol{grid-column:1/-1}.kcm-split .kcm-scroll{flex:none;max-height:62vh;min-height:260px}.kcm-tarea{min-height:190px}}"
             "@media (max-width:820px){.kcm-split{grid-template-columns:minmax(0,1fr)}}"
@@ -606,7 +616,16 @@ window.kcmSnip=function(){
             # ── ② 원문 해석 문서 — 원문 그대로 두고 의학용어·약어 옆에 한글 해석을 붙여 보여 준다 (용어표는 아래에 접어 둠)
             with ui.column().classes("gap-2 w-full") as col_terms:
                 hdr_terms = ui.row().classes("w-full items-center")
-                ui.label("원문 그대로 보여 주고, 의학용어·약어 옆에 한글 해석(→)을 붙입니다. 용어에 마우스를 올리면 영문명이 보입니다.").classes("kcm-note1")
+                ui.label("원문을 그대로 보여 주고 한글 해석(→)을 함께 보여 줍니다. 보기 방식은 아래에서 고르세요.").classes("kcm-note1")
+                with ui.row().classes("w-full items-center gap-2").style("flex-wrap:wrap"):
+                    def set_doc_view(v: str) -> None:       # 보기 방식(용어 옆 · 줄 아래 · 좌우 비교)은 사용자별로 기억
+                        app.storage.user["doc_view"] = v
+                        save_ui_pref(doc_view=v)
+                        render_doc()
+                    ui.toggle({"inline": "용어 옆", "lines": "줄 아래", "side": "좌우 비교"}, value=app.storage.user.get("doc_view", "lines"),
+                              on_change=lambda e: set_doc_view(e.value)).props("dense no-caps unelevated toggle-color=primary")
+                    tr_btn = ui.button("AI 번역으로 보기", icon="translate", on_click=lambda: run_translate()).props("dense no-caps outline").style("color:var(--color-accent)").tooltip(
+                        "줄 전체를 자연스러운 한글 문장으로 번역합니다(약 3~5초). 번역은 AI가 만든 참고용이며 줄 옆에 'AI' 표시가 붙습니다. 평소에는 용어를 한글로 바꿔 쓴 줄을 바로 보여 줍니다.")
                 with ui.column().classes("kcm-card w-full gap-2 kcm-scroll") as terms_panel:
                     terms_status = ui.label("").classes("text-muted").style("font-size:12px")
                     doc_view = ui.html("").classes("kcm-docview w-full")
@@ -651,7 +670,35 @@ window.kcmSnip=function(){
             if not text:
                 doc_view.set_content('<div class="kcm-empty"><span style="font-size:26px">Aa</span>문서를 판독하거나 본문을 입력하면<br>원문이 여기에 나타나고, 의학용어·약어 옆에 한글 해석이 붙습니다.</div>')
                 return
-            doc_view.set_content(terms.annotate_html(text, st["terms"]))
+            mode = app.storage.user.get("doc_view", "lines")
+            if mode == "inline":
+                doc_view.set_content(terms.annotate_html(text, st["terms"]))
+            else:
+                doc_view.set_content(terms.pairs_html(terms.doc_pairs(text, st["terms"], cur_tr(text)), mode))
+
+        def cur_tr(text: str) -> dict:
+            """AI 번역 결과 — 본문이 바뀌었으면 쓰지 않는다 (줄 번호가 달라지므로)"""
+            t = st.get("tr") or {}
+            return t.get("map", {}) if t.get("sig") == hash(text) else {}
+
+        async def run_translate() -> None:
+            text = pii.clean(box.value or "").strip()
+            if not text:
+                ui.notify("번역할 본문이 없습니다.", type="warning")
+                return
+            if app.storage.user.get("doc_view", "lines") == "inline":
+                set_doc_view("lines")        # 번역은 줄 단위로 보여 준다
+            tr_btn.disable()
+            terms_status.set_text("AI가 줄 단위로 한글 번역하는 중입니다…")
+            try:
+                gl = [(r["term"], r["meaning"]) for r in st["terms"] if r.get("term") and r.get("meaning")]
+                m = await run.io_bound(gemini.translate_lines, text.split("\n"), gl)
+                st["tr"] = {"sig": hash(text), "map": m}
+                terms_status.set_text(f"AI 번역 {len(m)}줄 — 참고용입니다. 틀린 번역이 있을 수 있어 원문과 함께 확인하세요.")
+            except Exception as ex:  # noqa: BLE001
+                terms_status.set_text(f"AI 번역을 건너뛰었습니다 — {ex} (용어를 한글로 바꿔 쓴 줄을 보여 줍니다)")
+            tr_btn.enable()
+            render_doc()
 
         def render_terms() -> None:
             terms_box.clear()
@@ -961,7 +1008,12 @@ window.kcmSnip=function(){
             if sel.get("c1"):
                 parts.append(f"<h2>① 의무기록(소견서) 판독 — 원문</h2><pre>{e(text) if text else '(본문 없음)'}</pre>")
             if sel.get("c2"):
-                parts.append(f"<h2>② 원문 해석 문서 (의학용어·약어 한글 해석 포함)</h2><pre>{terms.annotate_html(text, st['terms']) if text else '(본문 없음)'}</pre>")
+                dmode = app.storage.user.get("doc_view", "lines")
+                if text and dmode != "inline":
+                    parts.append("<h2>② 원문 해석 문서 (" + ("좌우 비교" if dmode == "side" else "원문 아래 한글 해석") + ")</h2><div class='kcm-prt'>"
+                                 + terms.pairs_html(terms.doc_pairs(text, st["terms"], cur_tr(text)), dmode) + "</div>")
+                else:
+                    parts.append(f"<h2>② 원문 해석 문서 (의학용어·약어 한글 해석 포함)</h2><pre>{terms.annotate_html(text, st['terms']) if text else '(본문 없음)'}</pre>")
                 if sel.get("c2b") and st["terms"]:
                     rows = "".join(f"<tr><td>{e(r['term'])}</td><td class='c'>{e(r['kind'])}</td><td>{e(r['meaning'])}{(' (' + e(r['english']) + ')') if r.get('english') else ''}</td></tr>" for r in st["terms"])
                     parts.append("<h3>용어 · 약어 표</h3><table><tr><th>용어·약어</th><th>구분</th><th>해석</th></tr>" + rows + "</table>")
@@ -984,6 +1036,11 @@ window.kcmSnip=function(){
                     "td.c{text-align:center;white-space:nowrap}.foot{margin-top:18px;color:#666;font-size:11px}"
                     ".kcm-tm{border-bottom:1px dotted #333}.kcm-tm em{font-style:normal;font-weight:700;color:#0b5ea8;margin-left:3px}"
                     ".kcm-tm em::before{content:'→ '}pre{line-height:1.9}h3{font-size:12.5px;margin:12px 0 4px}"
+                    ".kcm-prt{border:1px solid #bbb;padding:10px;border-radius:4px}.kcm-ln{margin:0 0 7px;page-break-inside:avoid}.kcm-ln .o{white-space:pre-wrap;line-height:1.7}"
+                    ".kcm-ln .g{white-space:pre-wrap;color:#0b5ea8;font-weight:700;padding-left:10px;border-left:3px solid #9bb8d6;margin-top:1px}"
+                    ".kcm-ln-sp,.kcm-sd-sp{height:8px}.kcm-sd{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:4px 0;border-bottom:1px solid #ddd;page-break-inside:avoid}"
+                    ".kcm-sd-h{font-weight:700;color:#555;font-size:11px}.kcm-sd .o{white-space:pre-wrap}.kcm-sd .g{white-space:pre-wrap;color:#0b5ea8;font-weight:700}"
+                    ".kcm-aitag{font-size:9px;font-weight:800;color:#fff;background:#0b5ea8;border-radius:3px;padding:0 3px;margin-right:4px}"
                     "@media print{body{margin:0}}</style></head><body>" + "".join(parts) + "</body></html>")
 
         ui.add_css(
@@ -1005,7 +1062,8 @@ window.kcmSnip=function(){
             if st["docs"]:
                 meta.append("첨부 문서: " + ", ".join(d["name"] for d in st["docs"]))
             ai = st.get("ai_last") or {}
-            return {"title": "의무기록(소견서) 판독 결과", "meta": meta, "text": text, "annotated": terms.annotate_plain(text, st["terms"]),
+            return {"title": "의무기록(소견서) 판독 결과", "meta": meta, "text": text, "annotated": (terms.pairs_plain(terms.doc_pairs(text, st["terms"], cur_tr(text))) if app.storage.user.get("doc_view", "lines") != "inline"
+                         else terms.annotate_plain(text, st["terms"])),
                     "terms": st["terms"], "codes": ai.get("codes") or [], "caution": ai.get("caution", ""), "sel": sel, "names": names}
 
         def print_result() -> None:
