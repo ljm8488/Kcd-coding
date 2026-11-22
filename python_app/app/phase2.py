@@ -265,7 +265,11 @@ window.kcmSnip=function(){
     st = {"docs": [], "terms": []}   # docs: [{name, mime, data, sel}]
 
     with ui.column().classes("w-full max-w-6xl gap-4"):
-        ui.label("AI 자동 코딩 · 임상 텍스트 분석").classes("kcm-h1")
+        with ui.row().classes("w-full items-center justify-between no-wrap gap-3"):
+            ui.label("AI 자동 코딩 · 임상 텍스트 분석").classes("kcm-h1")
+            # 화면 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄하는 버튼 — 한 칸 안에 두면 그 칸만 인쇄하는 것으로 오해하므로 제목 줄 오른쪽에 둔다
+            ui.button("인쇄 · 미리보기", icon="print", on_click=lambda: print_result(), color=None).props("outline no-caps").style(
+                "flex:none;color:var(--color-accent);font-weight:700").tooltip("판독 화면 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄합니다. 인쇄할 칸은 미리보기 창에서 고릅니다.")
         ui.label("의무기록 서식을 붙여 넣거나 문서를 첨부해 판독하면 진단 문구를 추출하고, 상병마스터"
                  f"({len(idx):,}건)로 검증해 주진단 · 부진단을 제안합니다. 적용 조건: {cond['dept']} · {cond['purpose']}") \
             .classes("text-muted").style("font-size:13px;margin-top:-8px")
@@ -483,8 +487,6 @@ window.kcmSnip=function(){
                 with ui.row().classes("gap-2 w-full no-wrap"):
                     btn = ui.button("AI 해석 실행", icon="auto_awesome", on_click=lambda: run_both()).props("no-caps unelevated color=primary size=lg").classes("grow").style("white-space:nowrap;min-width:0")
                     ui.button("비우기", on_click=lambda: box.set_value("")).props("no-caps outline").style("white-space:nowrap;flex:none")
-                    ui.button(icon="print", on_click=lambda: print_result(), color=None).props("outline").style(
-                        "flex:none;color:var(--color-accent)").tooltip("판독 결과 인쇄 (본문 · AI 코드 후보 · 용어 해석)")
                 status = ui.label("").classes("text-muted").style("font-size:12px")
                 ui.label("한 번 누르면 ② 원문 해석 문서와 ③ 코드 후보가 동시에 진행됩니다. 성별·연령은 코드 후보의 성별·연령 불일치 경고에 쓰입니다.").classes("kcm-note1").style("font-size:12px")
         # ── 해석 결과 — AI 해석(코드 후보)과 의학용어·약어 해석을 두 탭으로 나눠 보여 주고, 실행하면 동시에 진행한다
@@ -897,44 +899,8 @@ window.kcmSnip=function(){
                 if caution:
                     ui.label("주의: " + caution).classes("text-sm text-muted")
 
-        def print_result() -> None:
-            """인쇄 버튼 — 무엇을 인쇄할지 고르는 창을 연다 (① 원문 · ② 해석 문서 · ③ AI 코드 후보)"""
-            text = pii.clean((box.value or "")).strip()
-            if not text and not st["docs"]:
-                ui.notify("인쇄할 내용이 없습니다. 문서를 판독하거나 본문을 입력하세요.", type="warning")
-                return
-            last = app.storage.user.get("print_sel") or {}
-            has_ai = bool((st.get("ai_last") or {}).get("codes"))
-            with ui.dialog() as dlg, ui.card().style("min-width:340px;gap:6px"):
-                ui.label("무엇을 인쇄할까요?").style("font-family:var(--font-heading);font-weight:700;font-size:17px")
-                ui.label("인쇄할 칸을 고르세요. 고른 칸만 한 문서로 인쇄됩니다.").classes("text-muted").style("font-size:12px")
-                c1 = ui.checkbox("① 의무기록(소견서) 판독 — 원문", value=last.get("c1", True))
-                c2 = ui.checkbox("② 원문 해석 문서 — 한글 해석(→) 포함", value=last.get("c2", True))
-                c2b = ui.checkbox("용어 · 약어 표도 함께 인쇄", value=last.get("c2b", False)).style("margin-left:26px")
-                c2b.bind_enabled_from(c2, "value")
-                c3 = ui.checkbox("③ AI 해석 결과 · 코드 후보" + ("" if has_ai else "  (아직 결과 없음)"), value=last.get("c3", True) and has_ai)
-                c3.set_enabled(has_ai)
-                with ui.row().classes("w-full justify-between items-center").style("margin-top:8px"):
-                    with ui.row().classes("gap-1"):
-                        ui.button("전체", on_click=lambda: (c1.set_value(True), c2.set_value(True), c3.set_value(has_ai))).props("flat dense no-caps")
-                        ui.button("선택 해제", on_click=lambda: (c1.set_value(False), c2.set_value(False), c3.set_value(False))).props("flat dense no-caps")
-                    with ui.row().classes("gap-2"):
-                        ui.button("취소", on_click=dlg.close).props("flat no-caps")
-
-                        def go() -> None:
-                            sel = {"c1": c1.value, "c2": c2.value, "c2b": bool(c2b.value and c2.value), "c3": bool(c3.value and has_ai)}
-                            if not (sel["c1"] or sel["c2"] or sel["c3"]):
-                                ui.notify("인쇄할 칸을 하나 이상 고르세요.", type="warning")
-                                return
-                            app.storage.user["print_sel"] = sel
-                            dlg.close()
-                            do_print(sel)
-                        ui.button("인쇄", icon="print", on_click=go).props("unelevated color=primary no-caps")
-            dlg.open()
-
-        def do_print(sel: dict) -> None:
-            """고른 칸만 A4 한 문서로 만들어 인쇄창을 연다"""
-            import json
+        def build_print_doc(sel: dict) -> str:
+            """고른 칸만 A4 한 문서(HTML)로 만든다 — 미리보기와 실제 인쇄가 같은 문서를 쓴다"""
             import datetime as dt
             e = html.escape
             text = pii.clean((box.value or "")).strip()
@@ -962,19 +928,69 @@ window.kcmSnip=function(){
                     parts.append(f"<p class='meta'>주의: {e(st['ai_last']['caution'])}</p>")
             if sel.get("c3"):
                 parts.append("<p class='foot'>※ AI가 제안한 내용은 참고용이며 최종 코딩은 담당자의 확인이 필요합니다.</p>")
-            doc = ("<!doctype html><html><head><meta charset='utf-8'><title>의무기록 판독 결과</title><style>"
-                   "@page{size:A4;margin:16mm}body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#111;font-size:12px;line-height:1.55}"
-                   "h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:18px 0 6px;padding-bottom:3px;border-bottom:2px solid #333}"
-                   ".meta{color:#555;margin:2px 0}pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;border:1px solid #bbb;padding:10px;border-radius:4px}"
-                   "table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:4px 6px;vertical-align:top;text-align:left}th{background:#eee}"
-                   "td.c{text-align:center;white-space:nowrap}.foot{margin-top:18px;color:#666;font-size:11px}"
-                   ".kcm-tm{border-bottom:1px dotted #333}.kcm-tm em{font-style:normal;font-weight:700;color:#0b5ea8;margin-left:3px}"
-                   ".kcm-tm em::before{content:'→ '}pre{line-height:1.9}h3{font-size:12.5px;margin:12px 0 4px}</style></head><body>" + "".join(parts) + "</body></html>")
-            # 보이지 않는 틀(iframe)에 문서를 쓰고 인쇄 — 팝업 차단에 걸리지 않는다
-            ui.run_javascript(
-                "(function(h){var f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';"
-                "document.body.appendChild(f);var d=f.contentWindow.document;d.open();d.write(h);d.close();"
-                "setTimeout(function(){f.contentWindow.focus();f.contentWindow.print();setTimeout(function(){f.remove()},60000)},300)})(" + json.dumps(doc) + ")")
+            if not (sel.get("c1") or sel.get("c2") or sel.get("c3")):
+                parts.append("<p class='meta' style='margin-top:40px;text-align:center'>인쇄할 칸을 하나 이상 고르세요.</p>")
+            return ("<!doctype html><html><head><meta charset='utf-8'><title>의무기록 판독 결과</title><style>"
+                    "@page{size:A4;margin:16mm}body{font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;color:#111;background:#fff;font-size:12px;line-height:1.55;margin:14px}"
+                    "h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:18px 0 6px;padding-bottom:3px;border-bottom:2px solid #333}"
+                    ".meta{color:#555;margin:2px 0}pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;border:1px solid #bbb;padding:10px;border-radius:4px}"
+                    "table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:4px 6px;vertical-align:top;text-align:left}th{background:#eee}"
+                    "td.c{text-align:center;white-space:nowrap}.foot{margin-top:18px;color:#666;font-size:11px}"
+                    ".kcm-tm{border-bottom:1px dotted #333}.kcm-tm em{font-style:normal;font-weight:700;color:#0b5ea8;margin-left:3px}"
+                    ".kcm-tm em::before{content:'→ '}pre{line-height:1.9}h3{font-size:12.5px;margin:12px 0 4px}"
+                    "@media print{body{margin:0}}</style></head><body>" + "".join(parts) + "</body></html>")
+
+        def print_result() -> None:
+            """인쇄 · 미리보기 창 — 왼쪽에서 인쇄할 칸을 고르면 오른쪽 미리보기가 바로 바뀌고, 인쇄를 누르면 미리보기와 같은 문서가 인쇄된다"""
+            import json
+            text = pii.clean((box.value or "")).strip()
+            if not text and not st["docs"]:
+                ui.notify("인쇄할 내용이 없습니다. 문서를 판독하거나 본문을 입력하세요.", type="warning")
+                return
+            last = app.storage.user.get("print_sel") or {}
+            has_ai = bool((st.get("ai_last") or {}).get("codes"))
+            with ui.dialog() as dlg, ui.card().style("width:min(1020px,96vw);max-width:96vw;gap:10px;padding:18px"):
+                ui.label("인쇄 · 미리보기").style("font-family:var(--font-heading);font-weight:700;font-size:18px")
+                with ui.row().classes("w-full no-wrap items-stretch gap-4").style("flex-wrap:wrap"):
+                    with ui.column().classes("gap-1").style("flex:0 0 280px;min-width:240px"):
+                        ui.label("① ② ③ 중 인쇄할 칸을 고르세요. 오른쪽 미리보기에 바로 반영됩니다.").classes("text-muted").style("font-size:12px")
+                        c1 = ui.checkbox("① 의무기록(소견서) 판독 — 원문", value=last.get("c1", True))
+                        c2 = ui.checkbox("② 원문 해석 문서 — 한글 해석(→) 포함", value=last.get("c2", True))
+                        c2b = ui.checkbox("용어 · 약어 표도 함께", value=last.get("c2b", False)).style("margin-left:26px")
+                        c2b.bind_enabled_from(c2, "value")
+                        c3 = ui.checkbox("③ AI 해석 결과 · 코드 후보" + ("" if has_ai else "  (아직 결과 없음)"), value=last.get("c3", True) and has_ai)
+                        c3.set_enabled(has_ai)
+                        with ui.row().classes("gap-1"):
+                            ui.button("전체", on_click=lambda: (c1.set_value(True), c2.set_value(True), c3.set_value(has_ai))).props("flat dense no-caps")
+                            ui.button("선택 해제", on_click=lambda: (c1.set_value(False), c2.set_value(False), c3.set_value(False))).props("flat dense no-caps")
+                    prev = ui.element("iframe").style("flex:1 1 520px;min-width:300px;height:min(66vh,620px);border:1px solid var(--color-divider);border-radius:8px;background:#fff")
+
+                def cur_sel() -> dict:
+                    return {"c1": bool(c1.value), "c2": bool(c2.value), "c2b": bool(c2b.value and c2.value), "c3": bool(c3.value and has_ai)}
+
+                def refresh(_=None) -> None:
+                    prev._props["srcdoc"] = build_print_doc(cur_sel())
+                    prev.update()
+                for c in (c1, c2, c2b, c3):
+                    c.on_value_change(refresh)
+                refresh()
+                with ui.row().classes("w-full justify-end gap-2"):
+                    ui.button("취소", on_click=dlg.close).props("flat no-caps")
+
+                    def go() -> None:
+                        sel = cur_sel()
+                        if not (sel["c1"] or sel["c2"] or sel["c3"]):
+                            ui.notify("인쇄할 칸을 하나 이상 고르세요.", type="warning")
+                            return
+                        app.storage.user["print_sel"] = sel
+                        dlg.close()
+                        # 보이지 않는 틀(iframe)에 같은 문서를 쓰고 인쇄 — 팝업 차단에 걸리지 않는다
+                        ui.run_javascript(
+                            "(function(h){var f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';"
+                            "document.body.appendChild(f);var d=f.contentWindow.document;d.open();d.write(h);d.close();"
+                            "setTimeout(function(){f.contentWindow.focus();f.contentWindow.print();setTimeout(function(){f.remove()},60000)},300)})(" + json.dumps(build_print_doc(sel)) + ")")
+                    ui.button("인쇄", icon="print", on_click=go).props("unelevated color=primary no-caps")
+            dlg.open()
 
         async def on_text_change(_=None) -> None:
             """본문에 영어·의학용어가 있으면 알아서 한글로 해석한다 — 멈추면 먼저 내장 사전·KCD 영문명으로 즉시, 영어가 있으면 이어서 AI로 나머지까지"""
