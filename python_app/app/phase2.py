@@ -555,6 +555,10 @@ window.kcmSnip=function(){
             ".kcm-tm{border-bottom:1.5px dotted var(--color-accent);white-space:normal}"
             ".kcm-tm em{font-style:normal;font-weight:700;font-size:.88em;color:var(--color-accent);background:var(--a100);border-radius:4px;padding:0 5px;margin:0 2px 0 4px;white-space:nowrap}"
             ".kcm-tm em::before{content:'→ '}"
+            # 인쇄 · 미리보기 버튼 — 강조색으로 채우고 그림자를 줘서 한눈에 띄게 한다
+            ".kcm-printbtn{box-shadow:0 3px 10px -2px color-mix(in srgb,var(--color-accent) 55%,transparent)!important;transition:transform .12s,box-shadow .12s}"
+            ".kcm-printbtn:hover{transform:translateY(-1px);box-shadow:0 6px 14px -3px color-mix(in srgb,var(--color-accent) 70%,transparent)!important}"
+            ".kcm-printbtn .q-icon{font-size:22px}"
             # 보기 전환 버튼 — 테두리 있는 버튼 묶음으로 보이게 해서 눌러서 바꾸는 기능임을 알린다 (선택된 것은 색을 채움)
             ".kcm-segtg{border:1.5px solid var(--color-accent);border-radius:10px;overflow:hidden;box-shadow:var(--elev-1);background:var(--surface)}"
             ".kcm-segtg .q-btn{padding:5px 13px;min-height:32px;font-weight:700;font-size:13px;cursor:pointer;background:var(--surface)!important;color:var(--color-accent)!important;transition:background .12s}"
@@ -602,8 +606,8 @@ window.kcmSnip=function(){
         # 판독 결과 전체를 인쇄하는 줄 — 결과 칸들 바로 위에 두어 ①②③ 전체가 대상임을 분명히 한다 (인쇄할 칸은 미리보기 창에서 고른다)
         with ui.row().classes("w-full items-center justify-between no-wrap gap-3").style("margin-bottom:-6px"):
             ui.label("판독 결과  ①  원문  ·  ②  해석 문서  ·  ③  AI 코드 후보").classes("text-muted").style("font-size:12.5px;font-weight:600;letter-spacing:.02em")
-            ui.button("인쇄 · 미리보기", icon="print", on_click=lambda: print_result(), color=None).props("outline dense no-caps").style(
-                "flex:none;color:var(--color-accent);font-weight:700;padding:0 14px").tooltip("판독 결과 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄합니다. 인쇄할 칸은 미리보기 창에서 고릅니다.")
+            ui.button("인쇄 · 미리보기", icon="print", on_click=lambda: print_result()).props("unelevated no-caps color=primary").classes("kcm-printbtn").style(
+                "flex:none;font-weight:800;font-size:14px;padding:6px 18px;border-radius:10px").tooltip("판독 결과 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄합니다. 인쇄할 칸은 미리보기 창에서 고릅니다.")
         with ui.element("div").classes("kcm-split") as split_el:
             # ── ② AI 해석 결과 (KCD 코드 후보)
             with ui.column().classes("gap-2 w-full") as col_ai:
@@ -705,7 +709,7 @@ window.kcmSnip=function(){
             terms_status.set_text("AI가 줄 단위로 한글 번역하는 중입니다…")
             try:
                 gl = [(r["term"], r["meaning"]) for r in st["terms"] if r.get("term") and r.get("meaning")]
-                m = await run.io_bound(gemini.translate_lines, text.split("\n"), gl)
+                m = await run.io_bound(gemini.translate_lines, [terms.block_text(b) if b != [""] else "" for b in terms.blocks(text)], gl)   # 문장(덩어리) 단위로 번역
                 st["tr"] = {"sig": hash(text), "map": m}
                 terms_status.set_text(f"AI 번역 {len(m)}줄 — 참고용입니다. 틀린 번역이 있을 수 있어 원문과 함께 확인하세요.")
             except Exception as ex:  # noqa: BLE001

@@ -216,16 +216,61 @@ def substitute_line(line: str, rows: list[dict]) -> str:
     return "".join(out) if changed else ""
 
 
+_NEW_ITEM = re.compile(r"^\s*(#\.|[-•*※▶▷■□●○◆◇>]|\d+[.)]\s|[(\[<]|[가-힣A-Za-z]{1,8}\s*[:：])")
+_SENT_END = re.compile(r"([.!?。)\]>:：]|다|요|함|음|임|됨|음)\s*$")
+
+
+def blocks(text: str) -> list[list[str]]:
+    """OCR·붙여넣기 글은 한 문장이 중간에서 줄바꿈된 경우가 많다 — 이어지는 줄을 한 덩어리(문장)로 묶는다.
+    새 덩어리: 빈 줄 · 글머리(#. - 1. ※ …) · 앞 줄이 문장 끝(마침표·다·요 등) · 앞 줄이 다른 줄보다 뚜렷이 짧음(제목·짧은 항목)."""
+    lines = (text or "").split("\n")
+    maxlen = max((len(l.strip()) for l in lines), default=0)
+    out: list[list[str]] = []
+    for l in lines:
+        s = l.strip()
+        if not s:
+            out.append([""])
+            continue
+        prev = out[-1][-1].strip() if out and out[-1] != [""] else ""
+        # 글머리로 시작한 항목 줄은 거의 가득 찬 줄(=다음 줄로 이어짐)일 때만 이어 붙이고, 일반 문단 줄은 어느 정도 길면 이어 붙인다
+        need = int(maxlen * 0.8) if _NEW_ITEM.match(prev) else max(18, int(maxlen * 0.4))
+        cont = bool(prev) and not _NEW_ITEM.match(s) and not _SENT_END.search(prev) and len(prev) >= need
+        if cont:
+            out[-1].append(l)
+        else:
+            out.append([l])
+    return out
+
+
+def block_text(b: list[str]) -> str:
+    """덩어리를 한 문장으로 이어 붙인다 — 줄 끝이 한 글자짜리 토막(입 / 원치료)이면 붙여 쓰고, 아니면 공백으로 잇는다."""
+    s = ""
+    for l in b:
+        t = l.strip()
+        if not s:
+            s = t
+            continue
+        last = s.split(" ")[-1]
+        glue = "" if (len(last) == 1 and "가" <= last <= "힣" and "가" <= t[:1] <= "힣") else " "
+        s += glue + t
+    return s
+
+
 def doc_pairs(text: str, rows: list[dict], tr_map: dict | None = None) -> list[dict]:
-    """줄 단위 (원문, 한글 해석) 짝 — AI 번역이 있으면 그것을, 없으면 용어 치환 줄을 쓴다."""
+    """문장(덩어리) 단위 (원문, 한글 해석) 짝 — AI 번역이 있으면 그것을, 없으면 용어 치환 문장을 쓴다.
+    원문은 줄바꿈을 그대로 보여 주고, 해석은 이어 붙인 한 문장으로 만들어 문맥이 끊기지 않게 한다."""
     out = []
-    for i, line in enumerate((text or "").split("\n")):
+    for i, b in enumerate(blocks(text)):
+        if b == [""]:
+            out.append({"o": "", "g": "", "ai": False})
+            continue
+        joined = block_text(b)
         ai = (tr_map or {}).get(i, "")
-        g = ai or substitute_line(line, rows)
+        g = ai or substitute_line(joined, rows)
         g = re.sub(r"^\s*(#\.|[-•*])\s*", "", g)           # 줄머리 기호(#. · -)는 해석 줄에서 뺀다
-        if g.strip() == re.sub(r"^\s*(#\.|[-•*])\s*", "", line).strip():
+        if g.strip() == re.sub(r"^\s*(#\.|[-•*])\s*", "", joined).strip():
             g = ""
-        out.append({"o": line, "g": g, "ai": bool(ai)})
+        out.append({"o": "\n".join(b), "g": g, "ai": bool(ai)})
     return out
 
 
