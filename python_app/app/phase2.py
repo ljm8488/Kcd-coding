@@ -555,6 +555,14 @@ window.kcmSnip=function(){
             ".kcm-tm{border-bottom:1.5px dotted var(--color-accent);white-space:normal}"
             ".kcm-tm em{font-style:normal;font-weight:700;font-size:.88em;color:var(--color-accent);background:var(--a100);border-radius:4px;padding:0 5px;margin:0 2px 0 4px;white-space:nowrap}"
             ".kcm-tm em::before{content:'→ '}"
+            # 보기 전환 버튼 — 테두리 있는 버튼 묶음으로 보이게 해서 눌러서 바꾸는 기능임을 알린다 (선택된 것은 색을 채움)
+            ".kcm-segtg{border:1.5px solid var(--color-accent);border-radius:10px;overflow:hidden;box-shadow:var(--elev-1);background:var(--surface)}"
+            ".kcm-segtg .q-btn{padding:5px 13px;min-height:32px;font-weight:700;font-size:13px;cursor:pointer;background:var(--surface)!important;color:var(--color-accent)!important;transition:background .12s}"
+            ".kcm-segtg .q-btn+.q-btn{border-left:1px solid var(--a300)}"
+            ".kcm-segtg .q-btn:hover{background:var(--a100)!important}"
+            ".kcm-segtg .q-btn.bg-primary,.kcm-segtg .q-btn[aria-pressed=true]{background:var(--color-accent)!important;color:#fff!important}"
+            ".kcm-segtg .q-btn .q-focus-helper{display:none}"
+            ".kcm-seglbl{font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap}"
             # 줄 아래 · 좌우 비교 보기 — 원문은 그대로, 해석 줄은 연한 강조색
             ".kcm-docview:has(.kcm-ln),.kcm-docview:has(.kcm-sd){white-space:normal}"
             ".kcm-ln{margin:0 0 10px}.kcm-ln .o{white-space:pre-wrap;line-height:1.7}"
@@ -608,8 +616,11 @@ window.kcmSnip=function(){
                     app.storage.user["ai_view"] = v
                     save_ui_pref(ai_view=v)
                     render_ai_results()
-                ui.toggle({"card": "카드형", "list": "요약 목록"}, value=app.storage.user.get("ai_view", "card"),
-                          on_change=lambda e: set_ai_view(e.value)).props("dense no-caps unelevated toggle-color=primary").style("align-self:flex-start")
+                with ui.row().classes("items-center gap-2"):
+                    ui.label("보기 방식").classes("kcm-seglbl")
+                    ui.toggle({"card": "카드형", "list": "요약 목록"}, value=app.storage.user.get("ai_view", "card"),
+                              on_change=lambda e: set_ai_view(e.value)).props("dense no-caps unelevated toggle-color=primary").classes("kcm-segtg").tooltip(
+                        "눌러서 코드 후보를 카드(근거 포함) 또는 한 줄 요약 목록으로 바꿔 봅니다")
                 out = ui.column().classes("w-full gap-2 kcm-scroll")
                 with out:
                     ui.html('<div class="kcm-empty"><span style="font-size:26px">✦</span>‘AI 해석 실행’을 누르면<br>KCD 코드 후보가 여기에 나타납니다.</div>')
@@ -622,8 +633,10 @@ window.kcmSnip=function(){
                         app.storage.user["doc_view"] = v
                         save_ui_pref(doc_view=v)
                         render_doc()
+                    ui.label("보기 방식").classes("kcm-seglbl")
                     ui.toggle({"inline": "용어 옆", "lines": "줄 아래", "side": "좌우 비교"}, value=app.storage.user.get("doc_view", "lines"),
-                              on_change=lambda e: set_doc_view(e.value)).props("dense no-caps unelevated toggle-color=primary")
+                              on_change=lambda e: set_doc_view(e.value)).props("dense no-caps unelevated toggle-color=primary").classes("kcm-segtg").tooltip(
+                        "눌러서 원문과 한글 해석을 보여 주는 방식을 바꿉니다: 용어 옆 · 원문 줄 아래 · 좌우 비교")
                     tr_btn = ui.button("AI 번역으로 보기", icon="translate", on_click=lambda: run_translate()).props("dense no-caps outline").style("color:var(--color-accent)").tooltip(
                         "줄 전체를 자연스러운 한글 문장으로 번역합니다(약 3~5초). 번역은 AI가 만든 참고용이며 줄 옆에 'AI' 표시가 붙습니다. 평소에는 용어를 한글로 바꿔 쓴 줄을 바로 보여 줍니다.")
                 with ui.column().classes("kcm-card w-full gap-2 kcm-scroll") as terms_panel:
