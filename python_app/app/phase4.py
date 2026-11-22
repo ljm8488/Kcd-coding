@@ -178,6 +178,27 @@ def search_page() -> None:
 .kcm-lb-f{padding:8px 16px;font-size:12px;color:var(--muted);border-top:1px solid var(--color-divider)}
 @media (max-width:560px){.kcm-lb-p,.kcm-lb-n{width:32px;height:32px;font-size:20px}}
 """)
+    # 검색창 입력 보호 — 사용자가 방금 친 글자를 서버·재연결·화면 갱신이 예전 값으로 되돌려 써서 글자가 사라져 보이는 경우를 막는다
+    # (직접 클릭·엔터·Esc로 바뀐 값은 건드리지 않고, 한글 조합 중에도 개입하지 않는다)
+    ui.add_body_html("""<script>
+(function(){
+  if(window.__kcmGuard) return; window.__kcmGuard=1;
+  var last=null, actAt=0, composing=false, SEL='.kcm-search input';
+  function isS(el){return el&&el.matches&&el.matches(SEL);}
+  document.addEventListener('mousedown',function(){actAt=Date.now();},true);
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'||e.key==='Enter') actAt=Date.now(); },true);
+  document.addEventListener('compositionstart',function(e){ if(isS(e.target)) composing=true; },true);
+  document.addEventListener('compositionend',function(e){ if(isS(e.target)){ composing=false; last={v:e.target.value,t:Date.now()}; } },true);
+  document.addEventListener('input',function(e){ if(isS(e.target)&&!e.isComposing&&!composing) last={v:e.target.value,t:Date.now()}; },true);
+  setInterval(function(){
+    var el=document.querySelector(SEL);
+    if(!el||!last||composing||document.activeElement!==el) return;
+    var now=Date.now();
+    if(now-last.t>3000||now-actAt<3000){ if(now-actAt<3000) last=null; return; }
+    if(el.value!==last.v){ el.value=last.v; el.dispatchEvent(new Event('input',{bubbles:true})); }
+  },100);
+})();
+</script>""")
     ui.add_body_html("""<script>
 (function(){
   if(window.__kcmLB) return; window.__kcmLB=1;
@@ -271,8 +292,9 @@ def search_page() -> None:
             cond_btn.on_click(toggle_cond)
         info = ui.label("").classes("text-muted").style("font-size:12px")
         ui.add_css(""".kcm-tbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--color-divider);border-radius:8px;min-height:40px;
- padding:0 14px;background:var(--surface);cursor:grab;user-select:none;font-family:var(--font-heading);font-weight:600;font-size:15px}
+ padding:0 14px;background:var(--surface);cursor:pointer;user-select:none;font-family:var(--font-heading);font-weight:600;font-size:15px}
 .kcm-tbtn:hover{background:var(--surface-2)}
+.kcm-tbtn .kcm-grip{cursor:grab}
 .kcm-tbtn.on{background:var(--a200);border-color:var(--color-accent);color:var(--a800);box-shadow:inset 0 0 0 1px var(--a300)}
 .kcm-grip{color:var(--n600);font-weight:400}
 .kcm-cnt{background:var(--a300);color:var(--a900);font-weight:700;border-radius:999px;padding:0 8px;font-size:12px}
@@ -933,7 +955,9 @@ def search_page() -> None:
             render_results()
             status["res"] = "done"
             render_bar()
-            await asyncio.sleep(0)
+            # 타이핑 도중에는 주 결과만 먼저 보여 주고, 나머지 칸(유사어·진료과·연관 질환)은 입력이 잠깐 멈춘 뒤에 그린다
+            # → 글자를 칠 때마다 화면 전체를 다시 그리지 않아 입력이 끊기거나 늦게 보이는 일을 줄인다
+            await asyncio.sleep(0 if now else 0.5)
             if st["rid"] != rid:
                 return
             render_similar()

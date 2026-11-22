@@ -128,36 +128,51 @@ def english_terms(text: str, rows: list) -> list[dict]:
     return sorted(found.values(), key=lambda r: -r["n"])
 
 
-def annotate_html(text: str, rows: list[dict]) -> str:
-    """원문 그대로 두고, 의학용어·약어 바로 옆에 한글 해석을 붙인 HTML — 예) HTN<em>고혈압</em>. 줄바꿈은 호출하는 쪽 CSS(pre-wrap)가 살린다."""
-    import html as _h
+def annotate_segments(text: str, rows: list[dict]) -> list[tuple[str, dict | None]]:
+    """본문을 (조각, 해석 행 또는 None) 목록으로 나눈다 — 해석이 붙는 용어는 행과 함께, 나머지는 None"""
     items = {}
     for r in rows or []:
         t, m = str(r.get("term", "")).strip(), str(r.get("meaning", "")).strip()
         if t and m and t.lower() != m.lower():
             items.setdefault(t.lower(), r)
     if not text:
-        return ""
+        return []
     if not items:
-        return _h.escape(text)
+        return [(text, None)]
 
     def alt(k: str) -> str:
         e = re.escape(k)
         return (r"(?<![A-Za-z0-9])" + e + r"(?![A-Za-z0-9])") if re.fullmatch(r"[A-Za-z0-9 .\-/']+", k) else e
 
     rx = re.compile("|".join(alt(k) for k in sorted(items, key=len, reverse=True)), re.I)
-    out, pos = [], 0
+    out: list[tuple[str, dict | None]] = []
+    pos = 0
     for m in rx.finditer(text):
-        out.append(_h.escape(text[pos:m.start()]))
-        r = items.get(m.group(0).lower())
-        if r is None:                                   # 대소문자·공백 차이로 못 찾으면 해석 없이 그대로
-            out.append(_h.escape(m.group(0)))
+        if m.start() > pos:
+            out.append((text[pos:m.start()], None))
+        out.append((m.group(0), items.get(m.group(0).lower())))      # 대소문자·공백 차이로 못 찾으면 해석 없이 그대로
+        pos = m.end()
+    if pos < len(text):
+        out.append((text[pos:], None))
+    return out
+
+
+def annotate_html(text: str, rows: list[dict]) -> str:
+    """원문 그대로 두고, 의학용어·약어 바로 옆에 한글 해석을 붙인 HTML — 예) HTN<em>고혈압</em>. 줄바꿈은 호출하는 쪽 CSS(pre-wrap)가 살린다."""
+    import html as _h
+    out = []
+    for seg, r in annotate_segments(text, rows):
+        if r is None:
+            out.append(_h.escape(seg))
         else:
             title = _h.escape(" · ".join(x for x in (r.get("english", ""), r.get("note", "")) if x), quote=True)
-            out.append(f'<span class="kcm-tm" title="{title}">{_h.escape(m.group(0))}<em>{_h.escape(str(r["meaning"]))}</em></span>')
-        pos = m.end()
-    out.append(_h.escape(text[pos:]))
+            out.append(f'<span class="kcm-tm" title="{title}">{_h.escape(seg)}<em>{_h.escape(str(r["meaning"]))}</em></span>')
     return "".join(out)
+
+
+def annotate_plain(text: str, rows: list[dict]) -> str:
+    """파일(Excel · 한글)용 글자만 — 예) HTN[→고혈압]"""
+    return "".join(seg if r is None else f"{seg}[→{r['meaning']}]" for seg, r in annotate_segments(text, rows))
 
 
 _RES_STOP = {"and", "or", "in", "on", "at", "of", "the", "to", "for", "by", "from", "with", "without", "is", "are", "was", "were", "be", "been",

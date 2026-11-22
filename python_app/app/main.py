@@ -187,6 +187,19 @@ NAV = [("search", "검색 · 코드 생성", "search", "/search"),
        ("kcd", "KCD 데이터", "storage", "/kcd"),
        ("dict", "용어 사전", "spellcheck", "/dict")]
 NAV_ROLES = {"dash": ("sysadmin", "orgadmin"), "users": ("sysadmin", "orgadmin"), "kcd": ("sysadmin",), "dict": ("sysadmin",)}
+# 메뉴에 마우스를 올렸을 때 보여 주는 기능 안내 (메뉴 이름 아래 한두 줄)
+NAV_DESC = {
+    "search": "병명 · 진단명 · 의학용어 · 약어 · 영문 · 코드를 입력하면 KCD 상병코드와 유사 용어, 연관 질환을 바로 찾아 줍니다.",
+    "cond": "진료과 · 코딩 목적 · KCD 판 · AI 최소 정확도 같은 코딩 조건을 정합니다. 검색과 AI 자동 코딩에 적용됩니다.",
+    "index": "KCD 3권 색인(주요 용어 → 하위 용어)을 단계별로 따라가며 코드를 찾습니다.",
+    "nlp": "의무기록 · 소견서를 붙여 넣거나 사진 · PDF를 판독하면 의학용어를 한글로 풀고 KCD 코드 후보를 제안합니다. 결과는 인쇄할 수 있습니다.",
+    "history": "내가 생성 · 확정한 코드 기록을 최근 500건까지 모아 보고 다시 찾아봅니다.",
+    "favs": "자주 쓰는 코드를 담아 두고 빠르게 꺼내 쓰는 나만의 코드 모음입니다.",
+    "dash": "코딩 이력과 사용자 활동을 일별 · 코드별 통계로 봅니다.",
+    "users": "사용자 계정을 등록 · 수정하고 소속과 권한을 관리합니다.",
+    "kcd": "KCD 상병마스터(코드 · 한글명 · 영문명)를 올리고 현재 적재 현황을 확인합니다.",
+    "dict": "검색에서 못 찾은 용어를 확인하고, 동의어 · 약어를 용어 사전에 등록해 검색이 잘 되게 합니다.",
+}
 TITLES = {k: t for k, t, _, _ in NAV}
 TITLES["password"] = "비밀번호 변경"
 NAV_INFO = {k: (icon, href) for k, _, icon, href in NAV}
@@ -400,7 +413,8 @@ def layout(active: str) -> None:
                                     for key in keys:
                                         icon, href = NAV_INFO[key]
                                         with ui.link(target=href).classes("kcm-item" + (" active" if key == active else "")).props(
-                                                f'draggable="true" data-dnd="nav:{title}" data-key="{key}" title="{TITLES[key]} · 끌어서 순서 변경"'):
+                                                f'draggable="true" data-dnd="nav:{title}" data-key="{key}"') as nav_lk:
+                                            nav_lk._props["title"] = f"{TITLES[key]}\n{NAV_DESC.get(key, '')}"      # 기능 안내(줄바꿈 포함)
                                             with ui.row().classes("items-center no-wrap gap-2"):
                                                 with ui.element("span").classes("kcm-tile"):
                                                     ui.icon(icon).classes("text-lg")
@@ -411,7 +425,8 @@ def layout(active: str) -> None:
                                                           on_click=lambda: toggle_sub("sub:search")).props("flat dense round size=sm").classes("kcm-subtoggle").style(
                                                     "margin-left:auto").tooltip("하위 메뉴 펴기" if sub_hidden else "하위 메뉴 숨기기").on("click.stop.prevent", lambda: None)
                                         if key == "search" and ("sub:search" not in (app.storage.user.get("nav_collapsed") or []) or active == "cond"):
-                                            with ui.link(target="/cond").classes("kcm-item kcm-sub" + (" active" if active == "cond" else "")).props('title="조건 설정"'):
+                                            with ui.link(target="/cond").classes("kcm-item kcm-sub" + (" active" if active == "cond" else "")) as sub_lk:
+                                                sub_lk._props["title"] = f"조건 설정\n{NAV_DESC['cond']}"
                                                 with ui.row().classes("items-center no-wrap gap-2"):
                                                     with ui.element("span").classes("kcm-tile").style("width:24px;height:24px;border-radius:6px"):
                                                         ui.icon("tune").classes("text-base")

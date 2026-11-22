@@ -1,0 +1,12 @@
+hwpx_skeleton.hwpx
+
+이 빈 한글(HWPX) 문서 틀은 python-hwpx 7.0.1 (https://pypi.org/project/python-hwpx/) 패키지의
+hwpx/data/Skeleton.hwpx 파일입니다.
+
+python-hwpx
+Copyright 2025-2026 airmang
+Licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0)
+
+본 앱은 이 파일을 데이터(문서 틀)로만 사용하며, python-hwpx 의 코드를 실행하거나 포함하지 않습니다.
+문서 본문(Contents/section0.xml)과 메타데이터만 앱에서 새로 만들어 교체합니다.

@@ -10,7 +10,7 @@ import uuid
 from fastapi.responses import Response
 from nicegui import app, run, ui
 
-from . import gemini, pii, store, terms
+from . import export, gemini, pii, store, terms
 from .main import get_index, layout, require_login, save_ui_pref, user
 from .search import norm
 
@@ -33,6 +33,25 @@ def _preview(token: str) -> Response:
     if not item:
         return Response(status_code=404)
     return Response(content=item[0], media_type=item[1], headers={"Cache-Control": "private, max-age=3600", "Content-Disposition": "inline"})
+
+# PDF 내려받기 — 브라우저에서 미리보기와 같은 문서를 그려 PDF로 저장 (html2pdf.js · cdnjs). 한글은 사용 중인 PC의 글꼴로 그려진다.
+PDF_JS = """(async function(h,fname){
+  function load(src){return new Promise(function(res,rej){var s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);});}
+  var wrap=null, box=null;
+  try{
+    if(!window.html2pdf){await load('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js');}
+    var d=new DOMParser().parseFromString(h,'text/html');
+    wrap=document.createElement('div'); wrap.style.cssText='position:fixed;left:-12000px;top:0;width:760px';
+    box=document.createElement('div'); box.className='kcm-pdfbox'; box.style.cssText='width:760px;background:#fff;color:#111';
+    var st=document.createElement('style');
+    st.textContent=d.querySelector('style').textContent.replace(/@page\\{[^}]*\\}/,'').replace('@media print{body{margin:0}}','').replace(/(^|\\})body\\{/,'$1.kcm-pdfbox{');
+    box.appendChild(st); box.insertAdjacentHTML('beforeend',d.body.innerHTML); wrap.appendChild(box); document.body.appendChild(wrap);
+    await html2pdf().set({margin:[12,12,12,12],filename:fname,image:{type:'jpeg',quality:0.96},html2canvas:{scale:2,useCORS:true},
+      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},pagebreak:{mode:['css','legacy'],avoid:['tr','h2']}}).from(box).save();
+    emitEvent('kcm_cap',{msg:'PDF를 내려받았습니다.',type:'positive'});
+  }catch(e){ emitEvent('kcm_cap',{msg:'PDF를 만들지 못했습니다. 인터넷 연결을 확인하거나, 인쇄에서 ‘PDF로 저장’을 선택하세요.',type:'negative'}); }
+  finally{ if(wrap) wrap.remove(); }
+})"""
 
 DEPTS = ["전체 진료과", "내과", "순환기내과", "신경과", "호흡기내과", "정형외과", "외과", "응급의학과", "가정의학과"]
 PURPOSES = ["주진단", "부진단", "외래 청구", "사망원인"]
@@ -265,11 +284,7 @@ window.kcmSnip=function(){
     st = {"docs": [], "terms": []}   # docs: [{name, mime, data, sel}]
 
     with ui.column().classes("w-full max-w-6xl gap-4"):
-        with ui.row().classes("w-full items-center justify-between no-wrap gap-3"):
-            ui.label("AI 자동 코딩 · 임상 텍스트 분석").classes("kcm-h1")
-            # 화면 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄하는 버튼 — 한 칸 안에 두면 그 칸만 인쇄하는 것으로 오해하므로 제목 줄 오른쪽에 둔다
-            ui.button("인쇄 · 미리보기", icon="print", on_click=lambda: print_result(), color=None).props("outline no-caps").style(
-                "flex:none;color:var(--color-accent);font-weight:700").tooltip("판독 화면 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄합니다. 인쇄할 칸은 미리보기 창에서 고릅니다.")
+        ui.label("AI 자동 코딩 · 임상 텍스트 분석").classes("kcm-h1")
         ui.label("의무기록 서식을 붙여 넣거나 문서를 첨부해 판독하면 진단 문구를 추출하고, 상병마스터"
                  f"({len(idx):,}건)로 검증해 주진단 · 부진단을 제안합니다. 적용 조건: {cond['dept']} · {cond['purpose']}") \
             .classes("text-muted").style("font-size:13px;margin-top:-8px")
@@ -436,7 +451,22 @@ window.kcmSnip=function(){
             with ui.row().classes("items-center gap-2 w-full").style("border-top:1px solid var(--color-divider);padding-top:10px"):
                 ocr_btn = ui.button("판독 실행", icon="document_scanner").props("no-caps unelevated color=primary")
                 ui.button("첨부 비우기", on_click=clear_docs).props("no-caps flat dense").style("color:var(--color-accent)")
-                ui.element("div").classes("grow")
+                # 판독 진행 — 판독 실행 중에만 보이며, 버튼과 설정 사이의 빈 공간에 한 줄로 보여 준다 (진행률 · 경과 · 중단)
+                ocr_cancel = {"v": False}
+                prog_spacer = ui.element("div").classes("grow")
+                with ui.column().classes("gap-0").style("flex:1 1 0;min-width:0") as prog_card:
+                    with ui.row().classes("items-center no-wrap gap-2 w-full"):
+                        prog_title = ui.label("").style("font-weight:700;font-size:13px;white-space:nowrap")
+                        prog_bar = ui.linear_progress(value=0, show_value=False, size="8px").props("rounded stripe animated").style("flex:1 1 60px;min-width:60px")
+                        prog_pct = ui.label("0%").style("font-family:var(--font-heading);font-weight:700;font-size:16px;color:var(--color-accent);min-width:42px;text-align:right")
+                        prog_pct.tooltip("진행률은 단계와 파일 크기로 계산한 예상치입니다. 판독 서비스가 중간 진행 정보를 주지 않아 실제 완료 시각과 약간 다를 수 있습니다.")
+                        ui.button(icon="stop", on_click=lambda: ocr_cancel.update(v=True)).props("flat round dense size=sm").style("color:var(--warn)").tooltip("판독 중단")
+                    prog_detail = ui.label("").classes("text-muted").style("font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%")
+                prog_card.set_visibility(False)
+
+                def show_prog(on: bool) -> None:
+                    prog_card.set_visibility(on)
+                    prog_spacer.set_visibility(not on)
                 set_sum = ui.label("").classes("text-muted").style("font-size:12px")
                 with ui.button("판독 설정", icon="tune").props("flat dense no-caps").style("color:var(--color-text)"):
                     with ui.menu().props("anchor='bottom right' self='top right'"):
@@ -458,16 +488,6 @@ window.kcmSnip=function(){
                     "환자 식별정보가 포함된 문서의 외부 전송은 원내 개인정보 규정을 먼저 확인하세요.")
             render_docs()
 
-        ocr_cancel = {"v": False}
-        # ── 판독 진행 표시 — 판독 실행 중에만 보이는 얇은 한 줄
-        with ui.row().classes("kcm-card w-full items-center gap-3 no-wrap").style("padding:8px 14px;min-height:0") as prog_card:
-            prog_title = ui.label("").style("font-weight:600;font-size:14px;white-space:nowrap")
-            prog_detail = ui.label("").classes("text-muted").style("font-size:12px;flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
-            prog_bar = ui.linear_progress(value=0, show_value=False, size="8px").props("rounded stripe animated").style("width:min(220px,26%);flex:none")
-            prog_pct = ui.label("0%").style("font-family:var(--font-heading);font-weight:700;font-size:18px;color:var(--color-accent);min-width:44px;text-align:right")
-            prog_pct.tooltip("진행률은 단계와 파일 크기로 계산한 예상치입니다. 판독 서비스가 중간 진행 정보를 주지 않아 실제 완료 시각과 약간 다를 수 있습니다.")
-            ui.button(icon="stop", on_click=lambda: ocr_cancel.update(v=True)).props("flat round dense size=sm").style("color:var(--warn)").tooltip("판독 중단")
-        prog_card.set_visibility(False)
         # ── ① 의무기록 입력 (아래 작업 영역의 첫 칸으로 옮겨진다)
         with ui.column().classes("gap-2 w-full kcm-inputcol") as body_card:
             ui.html('<div class="kcm-tbtn on" style="cursor:default;width:100%"><span class="kcm-step">1</span>의무기록(소견서) 판독</div>').classes("w-full")
@@ -541,6 +561,11 @@ window.kcmSnip=function(){
             ".kcm-inputcol textarea::placeholder{color:#8e959c!important;opacity:1!important;font-weight:400}"
             ".kcm-steps{padding:10px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--color-divider)}"
             "@keyframes kcm-pulse{0%{box-shadow:0 0 0 0 var(--a300)}70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}")
+        # 판독 결과 전체를 인쇄하는 줄 — 결과 칸들 바로 위에 두어 ①②③ 전체가 대상임을 분명히 한다 (인쇄할 칸은 미리보기 창에서 고른다)
+        with ui.row().classes("w-full items-center justify-between no-wrap gap-3").style("margin-bottom:-6px"):
+            ui.label("판독 결과  ①  원문  ·  ②  해석 문서  ·  ③  AI 코드 후보").classes("text-muted").style("font-size:12.5px;font-weight:600;letter-spacing:.02em")
+            ui.button("인쇄 · 미리보기", icon="print", on_click=lambda: print_result(), color=None).props("outline dense no-caps").style(
+                "flex:none;color:var(--color-accent);font-weight:700;padding:0 14px").tooltip("판독 결과 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄합니다. 인쇄할 칸은 미리보기 창에서 고릅니다.")
         with ui.element("div").classes("kcm-split") as split_el:
             # ── ② AI 해석 결과 (KCD 코드 후보)
             with ui.column().classes("gap-2 w-full") as col_ai:
@@ -713,7 +738,8 @@ window.kcmSnip=function(){
             total, texts, chars = len(sel), [], 0
             pii_total: dict = {}
             t_all = time.time()
-            prog_card.set_visibility(True)
+            docs_exp.set_value(True)             # 진행 표시가 보이도록 첨부 영역을 연다
+            show_prog(True)
             prog_title.set_text(f"판독 중 · 0 / {total}개")
             prog_pct.set_text("0%")
             prog_bar.set_value(0)
@@ -789,7 +815,7 @@ window.kcmSnip=function(){
                 prog_title.set_text(f"판독을 중단했습니다 · {took}초" if ocr_cancel["v"] else f"판독 실패 · 0/{total}개 · {took}초")
                 prog_bar.props("color=negative")
                 prog_detail.set_text("각 파일의 오류 안내를 확인하세요.")
-            ui.timer(12, lambda: prog_card.set_visibility(False), once=True)
+            ui.timer(12, lambda: show_prog(False), once=True)
 
         ocr_btn.on_click(run_ocr)
 
@@ -940,20 +966,45 @@ window.kcmSnip=function(){
                     ".kcm-tm em::before{content:'→ '}pre{line-height:1.9}h3{font-size:12.5px;margin:12px 0 4px}"
                     "@media print{body{margin:0}}</style></head><body>" + "".join(parts) + "</body></html>")
 
+        ui.add_css(
+            ".kcm-printdlg{width:min(1060px,96vw);height:min(84vh,800px);min-width:600px;min-height:440px;max-width:98vw!important;max-height:96vh!important;"
+            "resize:both;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:18px}"
+            ".q-dialog__inner--minimized>.kcm-printdlg{max-width:98vw!important}"
+            ".kcm-printbody{flex:1 1 0;min-height:0}"
+            ".kcm-printprev{flex:1 1 520px;min-width:300px;border:1px solid var(--color-divider);border-radius:8px;background:#fff;align-self:stretch;height:auto}")
+
+        def export_ctx(sel: dict) -> dict:
+            """Excel · 한글 파일용 내용 — 미리보기·인쇄와 같은 칸 선택(sel)을 따른다"""
+            import datetime as dt
+            text = pii.clean((box.value or "")).strip()
+            s, a = current_ctx()
+            u_ = user()
+            meta = [f"출력 {dt.datetime.now():%Y-%m-%d %H:%M} · 작성자 {u_.get('name') or u_.get('id') or ''}",
+                    f"적용 조건 {cond['dept']} / {cond['purpose']} · 환자 {({'M': '남', 'F': '여'}).get(s, '성별 미입력')}" + (f" · {a}세" if a is not None else "")]
+            if st["docs"]:
+                meta.append("첨부 문서: " + ", ".join(d["name"] for d in st["docs"]))
+            ai = st.get("ai_last") or {}
+            return {"title": "의무기록(소견서) 판독 결과", "meta": meta, "text": text, "annotated": terms.annotate_plain(text, st["terms"]),
+                    "terms": st["terms"], "codes": ai.get("codes") or [], "caution": ai.get("caution", ""), "sel": sel, "names": names}
+
         def print_result() -> None:
-            """인쇄 · 미리보기 창 — 왼쪽에서 인쇄할 칸을 고르면 오른쪽 미리보기가 바로 바뀌고, 인쇄를 누르면 미리보기와 같은 문서가 인쇄된다"""
+            """인쇄 · 미리보기 · 내려받기 창 — 인쇄할 칸을 고르면 오른쪽 미리보기가 바로 바뀌고, 인쇄·PDF·Excel·한글 파일 모두 같은 선택을 따른다.
+            창은 오른쪽 아래 모서리를 마우스로 끌어 크기를 바꿀 수 있다."""
             import json
             text = pii.clean((box.value or "")).strip()
             if not text and not st["docs"]:
-                ui.notify("인쇄할 내용이 없습니다. 문서를 판독하거나 본문을 입력하세요.", type="warning")
+                ui.notify("내보낼 내용이 없습니다. 문서를 판독하거나 본문을 입력하세요.", type="warning")
                 return
             last = app.storage.user.get("print_sel") or {}
             has_ai = bool((st.get("ai_last") or {}).get("codes"))
-            with ui.dialog() as dlg, ui.card().style("width:min(1020px,96vw);max-width:96vw;gap:10px;padding:18px"):
-                ui.label("인쇄 · 미리보기").style("font-family:var(--font-heading);font-weight:700;font-size:18px")
-                with ui.row().classes("w-full no-wrap items-stretch gap-4").style("flex-wrap:wrap"):
-                    with ui.column().classes("gap-1").style("flex:0 0 280px;min-width:240px"):
-                        ui.label("① ② ③ 중 인쇄할 칸을 고르세요. 오른쪽 미리보기에 바로 반영됩니다.").classes("text-muted").style("font-size:12px")
+            # no-backdrop-dismiss: 크기를 끌다가 창 밖에서 마우스를 놓아도 창이 닫히지 않게 한다 (닫기: 취소 · Esc)
+            with ui.dialog().props("no-backdrop-dismiss") as dlg, ui.card().classes("kcm-printdlg"):
+                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                    ui.label("인쇄 · 미리보기 · 내려받기").style("font-family:var(--font-heading);font-weight:700;font-size:18px")
+                    ui.label("↘ 오른쪽 아래 모서리를 끌어 창 크기를 바꿀 수 있습니다").classes("text-muted").style("font-size:11.5px")
+                with ui.row().classes("w-full no-wrap items-stretch gap-4 kcm-printbody"):
+                    with ui.column().classes("gap-1").style("flex:0 0 270px;min-width:230px;overflow:auto"):
+                        ui.label("내보낼 칸을 고르세요. 오른쪽 미리보기에 바로 반영됩니다.").classes("text-muted").style("font-size:12px")
                         c1 = ui.checkbox("① 의무기록(소견서) 판독 — 원문", value=last.get("c1", True))
                         c2 = ui.checkbox("② 원문 해석 문서 — 한글 해석(→) 포함", value=last.get("c2", True))
                         c2b = ui.checkbox("용어 · 약어 표도 함께", value=last.get("c2b", False)).style("margin-left:26px")
@@ -963,7 +1014,7 @@ window.kcmSnip=function(){
                         with ui.row().classes("gap-1"):
                             ui.button("전체", on_click=lambda: (c1.set_value(True), c2.set_value(True), c3.set_value(has_ai))).props("flat dense no-caps")
                             ui.button("선택 해제", on_click=lambda: (c1.set_value(False), c2.set_value(False), c3.set_value(False))).props("flat dense no-caps")
-                    prev = ui.element("iframe").style("flex:1 1 520px;min-width:300px;height:min(66vh,620px);border:1px solid var(--color-divider);border-radius:8px;background:#fff")
+                    prev = ui.element("iframe").classes("kcm-printprev")
 
                 def cur_sel() -> dict:
                     return {"c1": bool(c1.value), "c2": bool(c2.value), "c2b": bool(c2b.value and c2.value), "c3": bool(c3.value and has_ai)}
@@ -974,23 +1025,69 @@ window.kcmSnip=function(){
                 for c in (c1, c2, c2b, c3):
                     c.on_value_change(refresh)
                 refresh()
-                with ui.row().classes("w-full justify-end gap-2"):
-                    ui.button("취소", on_click=dlg.close).props("flat no-caps")
 
-                    def go() -> None:
-                        sel = cur_sel()
-                        if not (sel["c1"] or sel["c2"] or sel["c3"]):
-                            ui.notify("인쇄할 칸을 하나 이상 고르세요.", type="warning")
-                            return
-                        app.storage.user["print_sel"] = sel
-                        dlg.close()
-                        # 보이지 않는 틀(iframe)에 같은 문서를 쓰고 인쇄 — 팝업 차단에 걸리지 않는다
-                        ui.run_javascript(
-                            "(function(h){var f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';"
-                            "document.body.appendChild(f);var d=f.contentWindow.document;d.open();d.write(h);d.close();"
-                            "setTimeout(function(){f.contentWindow.focus();f.contentWindow.print();setTimeout(function(){f.remove()},60000)},300)})(" + json.dumps(build_print_doc(sel)) + ")")
-                    ui.button("인쇄", icon="print", on_click=go).props("unelevated color=primary no-caps")
+                def picked() -> dict | None:
+                    sel = cur_sel()
+                    if not (sel["c1"] or sel["c2"] or sel["c3"]):
+                        ui.notify("내보낼 칸을 하나 이상 고르세요.", type="warning")
+                        return None
+                    app.storage.user["print_sel"] = sel
+                    return sel
+
+                def go_print() -> None:
+                    sel = picked()
+                    if not sel:
+                        return
+                    dlg.close()
+                    # 보이지 않는 틀(iframe)에 같은 문서를 쓰고 인쇄 — 팝업 차단에 걸리지 않는다
+                    ui.run_javascript(
+                        "(function(h){var f=document.createElement('iframe');f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';"
+                        "document.body.appendChild(f);var d=f.contentWindow.document;d.open();d.write(h);d.close();"
+                        "setTimeout(function(){f.contentWindow.focus();f.contentWindow.print();setTimeout(function(){f.remove()},60000)},300)})(" + json.dumps(build_print_doc(sel)) + ")")
+
+                def fname(ext: str) -> str:
+                    import datetime as dt
+                    return f"의무기록_판독결과_{dt.datetime.now():%Y%m%d_%H%M}.{ext}"
+
+                def dl_pdf() -> None:
+                    sel = picked()
+                    if not sel:
+                        return
+                    ui.notify("PDF를 만드는 중입니다…", type="info", timeout=2500)
+                    ui.run_javascript(PDF_JS + "(" + json.dumps(build_print_doc(sel)) + "," + json.dumps(fname("pdf")) + ")")
+
+                def dl_xlsx() -> None:
+                    sel = picked()
+                    if sel:
+                        ui.download.content(export.build_xlsx(export_ctx(sel)), fname("xlsx"),
+                                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+                def dl_hwpx() -> None:
+                    sel = picked()
+                    if sel:
+                        ui.download.content(export.build_hwpx(export_ctx(sel)), fname("hwpx"), "application/haansofthwpx")
+
+                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                    with ui.button("내려받기", icon="download").props("outline no-caps").style("color:var(--color-accent)"):
+                        with ui.menu():
+                            with ui.column().classes("gap-0").style("min-width:230px"):
+                                for ico, lab, sub, fn in (("picture_as_pdf", "PDF (.pdf)", "그대로 보이는 문서", dl_pdf),
+                                                          ("table_chart", "Excel (.xlsx)", "시트별로 나눠 정리", dl_xlsx),
+                                                          ("description", "한글 (.hwpx)", "한글 2014 이상에서 열기", dl_hwpx)):
+                                    with ui.item(on_click=fn).props("clickable v-close-popup"):
+                                        with ui.item_section().props("avatar"):
+                                            ui.icon(ico)
+                                        with ui.item_section():
+                                            ui.item_label(lab)
+                                            ui.item_label(sub).props("caption")
+                    with ui.row().classes("gap-2"):
+                        ui.button("취소", on_click=dlg.close).props("flat no-caps")
+                        ui.button("인쇄", icon="print", on_click=go_print).props("unelevated color=primary no-caps")
             dlg.open()
+            # 크기를 끌어 바꿀 때 창이 가운데 기준으로 튀지 않도록, 열린 자리에 고정(왼쪽·위 기준)한다
+            ui.timer(0.5, lambda: ui.run_javascript(
+                "(function(){var c=document.querySelector('.kcm-printdlg');if(!c||c.dataset.anch)return;var r=c.getBoundingClientRect();c.dataset.anch=1;"
+                "c.style.position='fixed';c.style.left=r.left+'px';c.style.top=r.top+'px';c.style.margin='0';})()"), once=True)
 
         async def on_text_change(_=None) -> None:
             """본문에 영어·의학용어가 있으면 알아서 한글로 해석한다 — 멈추면 먼저 내장 사전·KCD 영문명으로 즉시, 영어가 있으면 이어서 AI로 나머지까지"""
