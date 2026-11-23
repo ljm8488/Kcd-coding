@@ -53,26 +53,40 @@ PDF_JS = """(async function(h,fname){
   finally{ if(wrap) wrap.remove(); }
 })"""
 
-# 인쇄 창 이동 — 제목줄(.kcm-printhead)을 끌면 창(.kcm-printdlg)이 따라 움직인다 (화면 밖으로 나가지 않게 일부는 항상 보이게)
+# 인쇄 창 이동·크기 조절 — 제목줄(.kcm-printhead)을 끌면 이동, 네 변과 네 모서리(.kcm-rz)를 끌면 그 방향으로 크기가 바뀐다
 PRINT_DRAG_JS = """(function(){
   function zoom(){return parseFloat(getComputedStyle(document.body).zoom)||1;}
   function anchor(c){ if(c.dataset.anch) return; var r=c.getBoundingClientRect(), z=zoom(); c.dataset.anch=1;
-    c.style.position='fixed'; c.style.margin='0'; c.style.left=(r.left/z)+'px'; c.style.top=(r.top/z)+'px'; }
-  if(!window.__kcmDrag){ window.__kcmDrag=1; var d=null;
+    c.style.position='fixed'; c.style.margin='0'; c.style.left=(r.left/z)+'px'; c.style.top=(r.top/z)+'px';
+    c.style.width=(r.width/z)+'px'; c.style.height=(r.height/z)+'px';
+    ['n','s','e','w','ne','nw','se','sw'].forEach(function(k){ var h=document.createElement('div'); h.className='kcm-rz kcm-rz-'+k; h.dataset.d=k; c.appendChild(h); }); }
+  if(!window.__kcmDrag){ window.__kcmDrag=1; var d=null, rz=null;
     document.addEventListener('pointerdown',function(e){
-      var h=e.target.closest&&e.target.closest('.kcm-printhead'); if(!h||e.button!==0) return;
-      var c=h.closest('.kcm-printdlg'); if(!c) return; anchor(c);
-      var r=c.getBoundingClientRect(); d={c:c,dx:e.clientX-r.left,dy:e.clientY-r.top}; e.preventDefault();
+      if(e.button!==0) return;
+      var g=e.target.closest&&e.target.closest('.kcm-rz');
+      if(g){ var c=g.closest('.kcm-printdlg'); if(!c) return; anchor(c); var r=c.getBoundingClientRect();
+        rz={c:c,k:g.dataset.d,x:e.clientX,y:e.clientY,l:r.left,t:r.top,w:r.width,h:r.height}; e.preventDefault(); return; }
+      var h=e.target.closest&&e.target.closest('.kcm-printhead'); if(!h) return;
+      var c2=h.closest('.kcm-printdlg'); if(!c2) return; anchor(c2);
+      var r2=c2.getBoundingClientRect(); d={c:c2,dx:e.clientX-r2.left,dy:e.clientY-r2.top}; e.preventDefault();
     },true);
     document.addEventListener('pointermove',function(e){
-      if(!d) return; var z=zoom(), w=d.c.getBoundingClientRect().width;
+      var z=zoom();
+      if(rz){ var dx=e.clientX-rz.x, dy=e.clientY-rz.y, k=rz.k, L=rz.l, T=rz.t, W=rz.w, H=rz.h, minW=600*z, minH=440*z;
+        if(k.indexOf('e')>=0){ W=Math.max(minW,Math.min(innerWidth-L-4,rz.w+dx)); }
+        if(k.indexOf('s')>=0){ H=Math.max(minH,Math.min(innerHeight-T-4,rz.h+dy)); }
+        if(k.indexOf('w')>=0){ W=Math.max(minW,rz.w-dx); L=rz.l+rz.w-W; if(L<0){ W+=L; L=0; } }
+        if(k.indexOf('n')>=0){ H=Math.max(minH,rz.h-dy); T=rz.t+rz.h-H; if(T<0){ H+=T; T=0; } }
+        var s=rz.c.style; s.left=(L/z)+'px'; s.top=(T/z)+'px'; s.width=(W/z)+'px'; s.height=(H/z)+'px'; return; }
+      if(!d) return; var w=d.c.getBoundingClientRect().width;
       var x=Math.max(60-w,Math.min(innerWidth-60,e.clientX-d.dx)), y=Math.max(0,Math.min(innerHeight-40,e.clientY-d.dy));
       d.c.style.left=(x/z)+'px'; d.c.style.top=(y/z)+'px';
     },true);
-    document.addEventListener('pointerup',function(){d=null;},true);
+    document.addEventListener('pointerup',function(){d=null;rz=null;},true);
   }
   var c=document.querySelector('.kcm-printdlg'); if(c) anchor(c);
 })()"""
+
 DEPTS = ["전체 진료과", "내과", "순환기내과", "신경과", "호흡기내과", "정형외과", "외과", "응급의학과", "가정의학과"]
 PURPOSES = ["주진단", "부진단", "외래 청구", "사망원인"]
 VERS = ["KCD 8차", "KCD 7차"]
@@ -1137,8 +1151,19 @@ window.kcmSnip=function(){
                     "@media print{body{margin:0}}</style></head><body>" + "".join(parts) + "</body></html>")
 
         ui.add_css(
+            # 창이 배경과 구분되도록: 강조색 테두리 · 깊은 그림자 · 살짝 밝은(강조색을 섞은) 바탕 · 색 있는 제목줄, 뒤 화면은 더 어둡게
             ".kcm-printdlg{width:min(1060px,96vw);height:min(84vh,800px);min-width:600px;min-height:440px;max-width:98vw!important;max-height:96vh!important;"
-            "resize:both;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:18px}"
+            "overflow:hidden;display:flex;flex-direction:column;gap:10px;padding:0 18px 16px;border:2px solid var(--color-accent);border-radius:14px;"
+            "background:color-mix(in srgb,var(--surface) 90%,var(--color-accent) 10%)!important;"
+            "box-shadow:0 28px 80px rgba(0,0,0,.7),0 0 0 6px color-mix(in srgb,var(--color-accent) 22%,transparent)!important}"
+            ".q-dialog:has(.kcm-printdlg) .q-dialog__backdrop{background:rgba(4,7,11,.74)!important;backdrop-filter:blur(2px)}"
+            ".kcm-printhead{margin:0 -18px;padding:12px 18px;background:var(--a200);border-bottom:1px solid var(--a300);color:var(--a900)}"
+            ".kcm-rz{position:absolute;z-index:6;touch-action:none}"
+            ".kcm-rz-n{top:0;left:14px;right:14px;height:7px;cursor:ns-resize}.kcm-rz-s{bottom:0;left:14px;right:14px;height:7px;cursor:ns-resize}"
+            ".kcm-rz-e{right:0;top:14px;bottom:14px;width:7px;cursor:ew-resize}.kcm-rz-w{left:0;top:14px;bottom:14px;width:7px;cursor:ew-resize}"
+            ".kcm-rz-ne{top:0;right:0;width:16px;height:16px;cursor:nesw-resize}.kcm-rz-sw{bottom:0;left:0;width:16px;height:16px;cursor:nesw-resize}"
+            ".kcm-rz-nw{top:0;left:0;width:16px;height:16px;cursor:nwse-resize}.kcm-rz-se{bottom:0;right:0;width:16px;height:16px;cursor:nwse-resize}"
+            ".kcm-rz:hover{background:color-mix(in srgb,var(--color-accent) 35%,transparent)}"
             ".q-dialog__inner--minimized>.kcm-printdlg{max-width:98vw!important}"
             ".kcm-printbody{flex:1 1 0;min-height:0}"
             ".kcm-printhead{cursor:move;user-select:none;touch-action:none}"
@@ -1212,7 +1237,7 @@ window.kcmSnip=function(){
             with ui.dialog().props("no-backdrop-dismiss") as dlg, ui.card().classes("kcm-printdlg"):
                 with ui.row().classes("w-full items-center justify-between no-wrap kcm-printhead").props('title="제목줄을 끌어 창을 옮길 수 있습니다"'):
                     ui.label("인쇄 · 미리보기 · 내려받기").style("font-family:var(--font-heading);font-weight:700;font-size:18px")
-                    ui.label("↔ 제목줄을 끌면 창 이동 · ↘ 오른쪽 아래 모서리를 끌면 크기 조절").classes("text-muted").style("font-size:11.5px")
+                    ui.label("제목줄을 끌면 이동 · 가장자리와 모서리를 끌면 크기 조절").style("font-size:11.5px;opacity:.8")
                 with ui.row().classes("w-full no-wrap items-stretch gap-4 kcm-printbody"):
                     with ui.column().classes("gap-1").style("flex:0 0 270px;min-width:230px;overflow:auto"):
                         ui.label("내보낼 칸을 고르세요. 오른쪽 미리보기에 바로 반영됩니다.").classes("text-muted").style("font-size:12px")
