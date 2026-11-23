@@ -10,7 +10,7 @@ import uuid
 from fastapi.responses import Response
 from nicegui import app, run, ui
 
-from . import export, gemini, pii, store, terms
+from . import export, gemini, pii, store, terms, work
 from .main import get_index, layout, require_login, save_ui_pref, user
 from .search import norm
 
@@ -301,13 +301,28 @@ window.kcmSnip=function(){
     fam = rules.Family(idx)
     names = {r.code.upper(): r.ko for r in idx.rows}
     cond = load_cond()
-    st = {"docs": [], "terms": []}   # docs: [{name, mime, data, sel}]
+    # 작업 보관 — 다른 메뉴에 다녀와도 판독·해석 내용이 남는다 (서버 메모리에만, 로그아웃·30분 미사용 시 삭제)
+    wkey = f"{user()['id']}|{app.storage.browser.get('id', '')}"
+    st = work.get(wkey)
+    restored = bool(st) and bool(str(st.get("text", "")).strip() or st.get("terms") or st.get("ai_last") or st.get("docs"))
+    if st is None:
+        st = work.put(wkey, {"docs": [], "terms": []})   # docs: [{name, mime, data, sel}]
+    restored_min = work.minutes_ago(st) if restored else 0
 
     with ui.column().classes("w-full max-w-6xl gap-4"):
         ui.label("AI 자동 코딩 · 임상 텍스트 분석").classes("kcm-h1")
         ui.label("의무기록 서식을 붙여 넣거나 문서를 첨부해 판독하면 진단 문구를 추출하고, 상병마스터"
                  f"({len(idx):,}건)로 검증해 주진단 · 부진단을 제안합니다. 적용 조건: {cond['dept']} · {cond['purpose']}") \
             .classes("text-muted").style("font-size:13px;margin-top:-8px")
+
+        # 이전 작업이 남아 있으면 알린다 — 다른 환자라면 바로 새로 시작할 수 있게
+        banner = ui.row().classes("w-full items-center justify-between no-wrap gap-3").style(
+            "padding:8px 14px;border-radius:10px;border:1px solid var(--warn);border-left:5px solid var(--warn);background:var(--surface)")
+        with banner:
+            ui.html(f"<b>이전 작업이 남아 있습니다</b> <span style='color:var(--muted)'>(마지막 작업 {restored_min}분 전). "
+                    "다른 환자의 문서라면 <b>새 환자 시작</b>을 누르세요. 로그아웃하거나 30분 동안 쓰지 않으면 자동으로 지워집니다.</span>").style("font-size:13px;line-height:1.55")
+            ui.button("새 환자 시작", icon="restart_alt", on_click=lambda: reset_work()).props("outline dense no-caps").style("flex:none;color:var(--warn)")
+        banner.set_visibility(restored)
 
         # ── 문서 첨부 · 판독
         with ui.expansion().classes("kcm-card w-full kcm-docs").props("dense") as docs_exp:
@@ -331,7 +346,7 @@ window.kcmSnip=function(){
             def render_steps() -> None:
                 """1 문서 첨부 → 2 판독 파일 선택 → 3 판독 실행 — 사용자가 어디까지 했는지 단계마다 표시한다."""
                 docs_ = st["docs"]
-                sel_ = [d for d in docs_ if d["sel"]]
+                sel_ = [d for d in docs_ if d["sel"] or d.get("purged")]
                 o = st.setdefault("ocr", "idle")
                 s1 = "done" if docs_ else "current"
                 s2 = "todo" if not docs_ else ("done" if sel_ else "current")
@@ -412,7 +427,7 @@ window.kcmSnip=function(){
                                 txt = dd["data"].decode("utf-8", "ignore")[:20000]
                                 ui.html(f'<pre style="width:100%;max-height:78vh;overflow:auto;white-space:pre-wrap;font-size:13px;margin:0">'
                                         f'{html.escape(txt)}</pre>')
-                        ui.label(f"{len(dd['data']) / 1024:,.0f} KB · {dd['state']}").classes("text-muted mono").style("font-size:11px")
+                        ui.label(f"{dd.get('size', len(dd['data'])) / 1024:,.0f} KB · {dd['state']}").classes("text-muted mono").style("font-size:11px")
 
                     def go(step: int) -> None:
                         cur["i"] = (cur["i"] + step) % len(st["docs"])
@@ -432,21 +447,29 @@ window.kcmSnip=function(){
                     ui.label(f"첨부 {len(st['docs'])}개 · 선택 {sum(1 for d in st['docs'] if d['sel'])}개").classes("text-muted").style("font-size:12px")
                     for d in st["docs"]:
                         with ui.row().classes("items-center no-wrap gap-2 w-full").style("border:1px solid var(--color-divider);border-radius:8px;padding:4px 8px"):
-                            ui.checkbox(value=d["sel"], on_change=lambda e, d=d: (d.update(sel=e.value), render_steps()))
+                            cb = ui.checkbox(value=d["sel"], on_change=lambda e, d=d: (d.update(sel=e.value), render_steps()))
+                            if d.get("purged"):
+                                cb.set_enabled(False)
                             thumb = ui.element("div").style("flex:none;width:52px;height:42px;border:1px solid var(--color-divider);border-radius:6px;overflow:hidden;"
                                                             "display:grid;place-items:center;cursor:zoom-in;background:var(--surface-2)")
                             with thumb:
-                                if d["mime"].startswith("image/"):
+                                if d.get("purged"):
+                                    ui.icon("lock", size="20px").classes("text-muted")
+                                elif d["mime"].startswith("image/"):
                                     ui.html(f'<img src="/_kcm/preview/{d.get("token", "")}" style="width:52px;height:42px;object-fit:cover;display:block" alt="">')
                                 else:
                                     ui.label({"application/pdf": "PDF", "text/plain": "TXT"}.get(d["mime"], "FILE")).classes("mono text-muted").style("font-size:11px")
-                            thumb.on("click", lambda _, d=d: open_preview(d))
+                            if not d.get("purged"):
+                                thumb.on("click", lambda _, d=d: open_preview(d))
                             with ui.column().classes("gap-0 grow").style("min-width:0"):
                                 ui.label(d["name"]).style("font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
-                                ui.label(f"{len(d['data']) / 1024:,.0f} KB · {d['state']}" + (f" · {d['pct']}%" if d.get("pct") is not None and d['state'] == "판독 중" else "")).classes("text-muted mono").style("font-size:11px")
+                                ui.label(f"{d.get('size', len(d['data'])) / 1024:,.0f} KB · {d['state']}" + (f" · {d['pct']}%" if d.get("pct") is not None and d['state'] == "판독 중" else "")).classes("text-muted mono").style("font-size:11px")
                                 if d.get("pct") is not None and d["state"] == "판독 중":
                                     ui.linear_progress(value=d["pct"] / 100, show_value=False, size="4px").props("rounded").classes("w-full")
-                            ui.button(icon="visibility", on_click=lambda _, d=d: open_preview(d)).props("flat round dense size=sm").tooltip("미리보기")
+                            if d.get("purged"):
+                                ui.button(icon="visibility_off").props("flat round dense size=sm disable").tooltip("개인정보 보호를 위해 판독 후 원본은 삭제했습니다")
+                            else:
+                                ui.button(icon="visibility", on_click=lambda _, d=d: open_preview(d)).props("flat round dense size=sm").tooltip("미리보기")
                             ui.button(icon="close", on_click=lambda _, d=d: drop_doc(d)).props("flat round dense size=sm").tooltip("삭제")
 
             async def on_upload(e) -> None:
@@ -454,10 +477,52 @@ window.kcmSnip=function(){
                 name = f.name if f else e.name
                 raw = await f.read() if f else e.content.read()
                 mime = ocr.guess_mime(name, getattr(f, "content_type", "") if f else getattr(e, "type", ""))
-                st["docs"].append({"name": name, "mime": mime, "data": raw, "sel": True, "state": "대기", "token": tmp_put(raw, mime)})
+                item = {"name": name, "mime": mime, "data": raw, "sel": True, "state": "대기", "token": tmp_put(raw, mime)}
+                work.touch(st)
+                # 이전 환자의 판독·해석이 남아 있는 상태에서 새 파일을 올리면, 환자 내용이 섞이지 않게 먼저 묻는다
+                if has_work() and time.time() > st.get("attach_ok", 0):
+                    st.setdefault("_pend", []).append(item)
+                    if not st.get("_asking"):
+                        st["_asking"] = True
+                        ask_attach()
+                    return
+                add_doc(item)
+
+            def add_doc(item: dict) -> None:
+                st["docs"].append(item)
                 st["ocr"] = "idle"
                 docs_exp.set_value(True)
                 render_docs()
+
+            def has_work() -> bool:
+                """지금 화면에 이전 판독·해석 내용이 남아 있는지"""
+                return bool((box.value or "").strip() or st["terms"] or st.get("ai_last") or any(d.get("purged") for d in st["docs"]))
+
+            def ask_attach() -> None:
+                with ui.dialog().props("no-backdrop-dismiss persistent") as dlg, ui.card().style("min-width:360px;gap:8px"):
+                    ui.label("이전 환자 내용이 남아 있습니다").style("font-family:var(--font-heading);font-weight:700;font-size:17px")
+                    ui.label("새 파일을 첨부하려고 합니다. 이전 환자의 판독·해석 내용을 지우고 새 환자로 시작할까요, "
+                             "아니면 같은 환자의 문서를 이어서 첨부할까요?").classes("text-muted").style("font-size:13px;line-height:1.6")
+
+                    def done(mode: str) -> None:
+                        pend = st.pop("_pend", [])
+                        st["_asking"] = False
+                        dlg.close()
+                        if mode == "cancel":
+                            up.reset()
+                            for it in pend:
+                                _TMP.pop(it.get("token"), None)
+                            return
+                        if mode == "new":
+                            reset_work(silent=True)
+                        st["attach_ok"] = time.time() + 180          # 잠시 동안은 다시 묻지 않는다 (여러 장을 연달아 올릴 때)
+                        for it in pend:
+                            add_doc(it)
+                    with ui.row().classes("w-full justify-end gap-2").style("flex-wrap:wrap"):
+                        ui.button("취소", on_click=lambda: done("cancel")).props("flat no-caps")
+                        ui.button("이어서 첨부 (같은 환자)", on_click=lambda: done("keep")).props("outline no-caps")
+                        ui.button("새 환자로 시작", icon="restart_alt", on_click=lambda: done("new")).props("unelevated no-caps color=primary")
+                dlg.open()
 
             def clear_docs() -> None:
                 for d_ in st["docs"]:
@@ -515,9 +580,11 @@ window.kcmSnip=function(){
                 ui.label("입원사유 · 과거력 · 검사 · 치료경과 · 최종진단을 붙여 넣거나, 위 ‘문서 첨부’로 판독해 채웁니다.").classes("kcm-note1")
                 with ui.row().classes("items-center gap-2 w-full no-wrap"):
                     ui.label("환자").classes("text-muted").style("font-size:13px")
-                    sex = ui.select({"": "성별 미입력", "M": "남", "F": "여"}, value="").props("dense outlined").classes("grow")
-                    age = ui.input(placeholder="연령(세)").props("dense outlined type=number min=0 max=120").classes("grow")
-                box = ui.textarea(placeholder="예) 소견서 · 의무기록\n"
+                    sex = ui.select({"": "성별 미입력", "M": "남", "F": "여"}, value=st.get("sex_v", "")).props("dense outlined").classes("grow")
+                    age = ui.input(placeholder="연령(세)", value=st.get("age_v") or "").props("dense outlined type=number min=0 max=120").classes("grow")
+                    sex.on_value_change(lambda e: st.update(sex_v=e.value))
+                    age.on_value_change(lambda e: st.update(age_v=e.value))
+                box = ui.textarea(value=st.get("text", ""), placeholder="예) 소견서 · 의무기록\n"
                                           "입원사유: 기침·발열, 호흡곤란\n"
                                           "과거력: 고혈압(HTN), 당뇨(DM)\n"
                                           "검사: 흉부 X-ray 우하엽 폐렴\n"
@@ -540,7 +607,7 @@ window.kcmSnip=function(){
 .kcm-spin{width:12px;height:12px;border:2px solid var(--a300);border-top-color:var(--color-accent);border-radius:50%;animation:kcmSpin .8s linear infinite;display:inline-block}
 @keyframes kcmSpin{to{transform:rotate(360deg)}}
 .kcm-err{font-size:12px;color:var(--warn);font-weight:600}""")
-        rt = {"ai": "idle", "terms": "idle", "ai_n": 0, "terms_n": 0}
+        rt = st.setdefault("rt", {"ai": "idle", "terms": "idle", "ai_n": 0, "terms_n": 0})
         ui.add_css(
             # 큰 화면: 세 칸이 같은 높이(화면에 맞춤)로 나란히 — 입력창과 결과 영역이 칸 안을 가득 채우고 넘치면 칸 안에서만 스크롤
             ".kcm-split{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:stretch;width:100%;"
@@ -606,8 +673,11 @@ window.kcmSnip=function(){
         # 판독 결과 전체를 인쇄하는 줄 — 결과 칸들 바로 위에 두어 ①②③ 전체가 대상임을 분명히 한다 (인쇄할 칸은 미리보기 창에서 고른다)
         with ui.row().classes("w-full items-center justify-between no-wrap gap-3").style("margin-bottom:-6px"):
             ui.label("판독 결과  ①  원문  ·  ②  해석 문서  ·  ③  AI 코드 후보").classes("text-muted").style("font-size:12.5px;font-weight:600;letter-spacing:.02em")
-            ui.button("인쇄 · 미리보기", icon="print", on_click=lambda: print_result()).props("unelevated no-caps color=primary").classes("kcm-printbtn").style(
-                "flex:none;font-weight:800;font-size:14px;padding:6px 18px;border-radius:10px").tooltip("판독 결과 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄합니다. 인쇄할 칸은 미리보기 창에서 고릅니다.")
+            with ui.row().classes("items-center gap-2 no-wrap").style("flex:none"):
+                ui.button("새 환자 시작", icon="restart_alt", on_click=lambda: reset_work()).props("outline dense no-caps").style(
+                    "color:var(--color-text);font-weight:600").tooltip("현재 판독·해석 내용과 첨부를 모두 지우고 새 환자로 시작합니다")
+                ui.button("인쇄 · 미리보기", icon="print", on_click=lambda: print_result()).props("unelevated no-caps color=primary").classes("kcm-printbtn").style(
+                    "flex:none;font-weight:800;font-size:14px;padding:6px 18px;border-radius:10px").tooltip("판독 결과 전체(① 원문 · ② 해석 문서 · ③ AI 코드 후보)를 인쇄합니다. 인쇄할 칸은 미리보기 창에서 고릅니다.")
         with ui.element("div").classes("kcm-split") as split_el:
             # ── ② AI 해석 결과 (KCD 코드 후보)
             with ui.column().classes("gap-2 w-full") as col_ai:
@@ -863,7 +933,13 @@ window.kcmSnip=function(){
                     t, pc = pii.mask(fut.result())          # 주민번호·전화번호·성명·주소 등 개인정보는 본문에 넣기 전에 가린다
                     for k_, n_ in pc.items():
                         pii_total[k_] = pii_total.get(k_, 0) + n_
-                    d["state"] = f"완료 · {len(t)}자"
+                    d["state"] = f"완료 · {len(t)}자 · 원본 삭제됨"
+                    # 개인정보 보호 — 글자를 읽고 나면 사진·PDF 원본은 서버 메모리에서 바로 지운다 (글자 결과만 남김)
+                    d["size"] = len(d["data"])
+                    d["data"] = b""
+                    d["sel"] = False
+                    d["purged"] = True
+                    _TMP.pop(d.get("token"), None)
                     texts.append(f"[{d['name']}]\n{t}")
                     chars += len(t)
                 except Exception as ex:  # noqa: BLE001
@@ -1068,6 +1144,45 @@ window.kcmSnip=function(){
             ".kcm-printhead{cursor:move;user-select:none;touch-action:none}"
             ".kcm-printprev{flex:1 1 520px;min-width:300px;border:1px solid var(--color-divider);border-radius:8px;background:#fff;align-self:stretch;height:auto}")
 
+        def reset_work(silent: bool = False) -> None:
+            """새 환자 시작 — 본문 · 첨부 · 판독 · 해석 · 번역 · 코드 후보를 모두 지운다 (내용이 있으면 먼저 확인)"""
+            def do() -> None:
+                for d_ in st["docs"]:
+                    _TMP.pop(d_.get("token"), None)
+                st["docs"].clear()
+                st["terms"] = []
+                for k in ("ai_last", "tr", "auto_sig", "attach_ok", "_pend", "_asking"):
+                    st.pop(k, None)
+                st.update(ocr="idle", text="", sex_v="", age_v=None)
+                rt.update(ai="idle", terms="idle", ai_n=0, terms_n=0)
+                box.set_value("")
+                sex.set_value("")
+                age.set_value(None)
+                try:
+                    up.reset()
+                except Exception:  # noqa: BLE001
+                    pass
+                status.set_text("")
+                terms_status.set_text("")
+                banner.set_visibility(False)
+                render_docs()
+                render_terms()
+                render_ai_results()
+                render_rbar()
+                work.touch(st)
+                if not silent:
+                    ui.notify("새 환자로 시작합니다. 이전 내용을 모두 지웠습니다.", type="positive")
+            if silent or not has_work() and not st["docs"]:
+                do()
+                return
+            with ui.dialog().props("no-backdrop-dismiss") as dlg, ui.card().style("min-width:340px;gap:8px"):
+                ui.label("새 환자로 시작할까요?").style("font-family:var(--font-heading);font-weight:700;font-size:17px")
+                ui.label("지금 화면의 본문, 첨부, 판독·해석 결과, AI 코드 후보가 모두 지워집니다. 지운 내용은 되돌릴 수 없습니다.").classes("text-muted").style("font-size:13px;line-height:1.6")
+                with ui.row().classes("w-full justify-end gap-2"):
+                    ui.button("취소", on_click=dlg.close).props("flat no-caps")
+                    ui.button("지우고 새로 시작", icon="restart_alt", on_click=lambda: (dlg.close(), do())).props("unelevated no-caps color=negative")
+            dlg.open()
+
         def export_ctx(sel: dict) -> dict:
             """Excel · 한글 파일용 내용 — 미리보기·인쇄와 같은 칸 선택(sel)을 따른다"""
             import datetime as dt
@@ -1187,6 +1302,8 @@ window.kcmSnip=function(){
         async def on_text_change(_=None) -> None:
             """본문에 영어·의학용어가 있으면 알아서 한글로 해석한다 — 멈추면 먼저 내장 사전·KCD 영문명으로 즉시, 영어가 있으면 이어서 AI로 나머지까지"""
             st["tchg"] = tid = st.get("tchg", 0) + 1
+            st["text"] = box.value or ""          # 다른 메뉴에 다녀와도 남도록 바로 보관
+            work.touch(st)
             await asyncio.sleep(1.0)
             raw = box.value or ""
             masked, pc = pii.mask(raw)
@@ -1209,4 +1326,19 @@ window.kcmSnip=function(){
             await interpret()
         box.on_value_change(on_text_change)
 
+        # 이전 작업 복원 — 메뉴를 다녀온 뒤 판독·해석·번역·코드 후보를 그대로 다시 그린다
+        for k_ in ("ai", "terms"):                          # 다른 메뉴로 나갈 때 진행 중이던 표시는 정리
+            if rt.get(k_) == "busy":
+                rt[k_] = "done" if (st.get("ai_last") if k_ == "ai" else st["terms"]) else "idle"
+        if st.get("ocr") == "busy":
+            st["ocr"] = "idle"
+        for d_ in st["docs"]:
+            if d_.get("state") == "판독 중":
+                d_["state"], d_["pct"] = "대기", None
         render_terms()
+        if restored:
+            render_ai_results()
+            render_rbar()
+            render_docs()
+            if st.get("ai_last"):
+                status.set_text(f"후보 {len(st['ai_last'].get('codes') or [])}건")

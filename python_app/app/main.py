@@ -490,6 +490,11 @@ def coming_soon(key: str, desc: str) -> None:
 
 
 def logout() -> None:
+    try:
+        from . import work
+        work.clear_user(str((app.storage.user.get("user") or {}).get("id", "")))     # 보관 중인 AI 자동 코딩 작업(환자 내용)을 지운다
+    except Exception:  # noqa: BLE001
+        pass
     app.storage.user.pop("user", None)
     app.storage.user.pop("pref_for", None)
     ui.navigate.to("/login")
