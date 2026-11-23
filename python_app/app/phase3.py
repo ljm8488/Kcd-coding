@@ -113,9 +113,12 @@ def _all_histories() -> list[dict]:
     """모든 사용자의 코딩 이력 — 집계라서 60초 동안은 이전 결과를 다시 쓴다 (대시보드를 열 때마다 전부 내려받지 않게)."""
     if time.time() - _HIST_CACHE["at"] < 60 and _HIST_CACHE["rows"]:
         return _HIST_CACHE["rows"]
-    r = store.client.get(f"{store.SUPABASE_URL}/rest/v1/kcm_store",
-                         params={"key": "eq.history", "select": "scope,data"}, timeout=60)
-    r.raise_for_status()
+    try:
+        r = store.client.get(f"{store.SUPABASE_URL}/rest/v1/kcm_store",
+                             params={"key": "eq.history", "select": "scope,data"}, timeout=60)
+        r.raise_for_status()
+    except Exception:  # noqa: BLE001        # 공용 DB가 안 될 때는 이전 집계(없으면 빈 목록)로 대시보드를 연다
+        return _HIST_CACHE["rows"]
     out = []
     for row in r.json():
         for h in row.get("data") or []:

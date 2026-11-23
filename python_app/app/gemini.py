@@ -339,7 +339,8 @@ def suggest_more(text: str, found: list[dict], dept: str = "", purpose: str = ""
 def suggest(text: str, dept: str = "", purpose: str = "") -> dict:
     """의무기록 → KCD 코드 후보. 경량 모델을 먼저 쓰고 느리면 다른 모델을 함께 띄워 먼저 끝나는 답을 쓴다.
     1차로 주진단·주요 질환을 뽑고, 2차 점검에서 빠진 동반질환·합병증·과거력을 보태 누락을 줄인다."""
-    ctx = f"진료과: {dept or '전체'}\n코딩 목적: {purpose or '주진단'}\n\n의무기록:\n{text.strip()}"
+    text = text.strip()[:20000]                          # 너무 긴 입력은 잘라서 보낸다 (응답 지연·비용 보호)
+    ctx = f"진료과: {dept or '전체'}\n코딩 목적: {purpose or '주진단'}\n\n의무기록:\n{text}"
     res = json.loads(generate_race(SYSTEM, [{"text": ctx}], 4096, schema=SCHEMA))
     codes = list(res.get("codes", []))
     try:

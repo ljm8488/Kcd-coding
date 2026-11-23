@@ -405,9 +405,11 @@ def search_page() -> None:
                         with ui.element("div").classes("kcm-seg"):
                             b1 = ui.element("button").classes("on" if view["mode"] == "tab" else "").on("click", lambda: set_mode("tab"))
                             with b1:
+                                ui.icon("tab")
                                 ui.label("탭 보기")
                             b2 = ui.element("button").classes("on" if view["mode"] == "puzzle" else "").on("click", lambda: set_mode("puzzle"))
                             with b2:
+                                ui.icon("dashboard")
                                 ui.label("퍼즐 보기")
                 if view["mode"] == "puzzle":
                     with ui.row().classes("items-center gap-3"):
@@ -588,9 +590,11 @@ def search_page() -> None:
                     with ui.element("div").classes("kcm-seg"):
                         b1 = ui.element("button").classes("on" if st["view"] == "card" else "").on("click", lambda: set_view("card"))
                         with b1:
+                            ui.icon("view_module")
                             ui.label("카드형")
                         b2 = ui.element("button").classes("on" if st["view"] == "list" else "").on("click", lambda: set_view("list"))
                         with b2:
+                            ui.icon("view_list")
                             ui.label("목록형")
                 if st["view"] == "card":
                     shown_groups = list(groups.items())[:st["limit"]]
@@ -708,7 +712,9 @@ def search_page() -> None:
         def gallery_html(items: list[dict], scored: bool) -> str:
             figs = []
             for x in items:
-                pct = f'<span class="kcm-cnt">{x["score"]}%</span> ' if scored else ""
+                if not str(x.get("url", "")).startswith(("https://", "http://")) or not str(x.get("img", "")).startswith(("https://", "http://")):
+                    continue                      # javascript: 같은 주소는 쓰지 않는다
+                pct =f'<span class="kcm-cnt">{x["score"]}%</span> ' if scored else ""
                 # 확대 팝업은 1024px 크기 (원본은 수십 MB일 수 있어 느림) — 위키미디어 썸네일 주소의 폭만 바꾼다
                 big = re.sub(r"/\d+px-", "/1024px-", x["img"], count=1) if "/thumb/" in x["img"] else (x.get("full") or x["img"])
                 figs.append(f'<figure class="kcm-fig"><a href="{esc(x["url"])}" target="_blank" rel="noopener" data-lb="{esc(big)}" '

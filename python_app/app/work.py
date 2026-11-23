@@ -27,9 +27,15 @@ def get(key: str) -> dict | None:
     return st
 
 
+MAX_ENTRIES = 300                   # 서버 메모리 보호 — 동시에 보관하는 작업 수의 상한 (넘으면 가장 오래 안 쓴 것부터 지운다)
+
+
 def put(key: str, st: dict) -> dict:
     st["at"] = time.time()
     _W[key] = st
+    if len(_W) > MAX_ENTRIES:
+        for k in sorted(_W, key=lambda k: _W[k].get("at", 0))[:len(_W) - MAX_ENTRIES]:
+            _W.pop(k, None)
     return st
 
 

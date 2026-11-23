@@ -125,7 +125,8 @@ body{--q-primary:var(--color-accent)}
 .kcm-acct{flex:none;border-top:1px solid var(--color-divider);padding:12px;display:grid;gap:10px;background:var(--surface-2);
  box-shadow:0 -6px 12px -8px rgba(0,0,0,.25)}
 .kcm-seg{display:inline-flex;overflow:hidden;border:1px solid var(--color-divider);border-radius:8px;background:var(--surface)}
-.kcm-seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12px;border-radius:6px;white-space:nowrap}
+.kcm-seg button{all:unset;cursor:pointer;padding:4px 10px;font-size:12px;border-radius:6px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+.kcm-seg button .q-icon{font-size:16px}
 .kcm-seg button.on{background:var(--color-accent);color:#fff}
 .kcm-tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.02em;padding:3px 10px;border-radius:999px;
  background:var(--a100);color:var(--a800);white-space:nowrap}
@@ -310,9 +311,11 @@ def account_panel(dm, u: dict) -> None:
                 dark_now = bool(app.storage.user.get("dark"))
                 light_b = ui.element("button").classes("" if dark_now else "on").on("click", lambda: set_dark(False))
                 with light_b:
+                    ui.icon("light_mode")
                     ui.label("라이트")
                 dark_b = ui.element("button").classes("on" if dark_now else "").on("click", lambda: set_dark(True))
                 with dark_b:
+                    ui.icon("dark_mode")
                     ui.label("다크")
         with ui.row().classes("w-full items-center justify-between no-wrap"):
             ui.label("화면 크기").classes("text-muted").style("font-size:12px")

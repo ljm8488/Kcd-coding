@@ -87,6 +87,26 @@ PRINT_DRAG_JS = """(function(){
   var c=document.querySelector('.kcm-printdlg'); if(c) anchor(c);
 })()"""
 
+def seg_group(options: dict, value: str, on_change, tip: str = "") -> None:
+    """아이콘이 붙은 보기 전환 버튼 묶음 — options: {값: (아이콘, 글자)}. 선택된 것은 강조색으로 채운다."""
+    btns: dict = {}
+
+    def paint(cur: str) -> None:
+        for k, b in btns.items():
+            b.props(remove="color")
+            if k == cur:
+                b.props("color=primary")
+
+    def pick(k: str) -> None:
+        paint(k)
+        on_change(k)
+    with ui.row().classes("kcm-segtg no-wrap items-stretch gap-0") as row:
+        for k, (ic, lab) in options.items():
+            btns[k] = ui.button(lab, icon=ic, on_click=lambda _, k=k: pick(k)).props("dense no-caps unelevated")
+    if tip:
+        row.tooltip(tip)
+    paint(value)
+
 DEPTS = ["전체 진료과", "내과", "순환기내과", "신경과", "호흡기내과", "정형외과", "외과", "응급의학과", "가정의학과"]
 PURPOSES = ["주진단", "부진단", "외래 청구", "사망원인"]
 VERS = ["KCD 8차", "KCD 7차"]
@@ -389,7 +409,8 @@ window.kcmSnip=function(){
                             ui.element("span").style("flex:1 1 24px;min-width:16px;height:4px;border-radius:2px;background:"
                                                      + ("var(--color-accent)" if nxt == "done" else "var(--color-divider)"))
             with ui.row().classes("w-full gap-3 items-stretch").style("flex-wrap:wrap"):
-                up = ui.upload(on_upload=lambda e: on_upload(e), multiple=True, auto_upload=True) \
+                up = ui.upload(on_upload=lambda e: on_upload(e), multiple=True, auto_upload=True, max_file_size=ocr.MAX_BYTES, max_files=12,
+                               on_rejected=lambda: ui.notify("파일이 너무 크거나 개수가 많습니다 (파일당 10MB · 최대 12개).", type="warning")) \
                     .props("accept=.pdf,.jpg,.jpeg,.png,.txt").style("position:absolute;width:0;height:0;overflow:hidden;opacity:0")
                 with ui.column().classes("kcm-dropzone items-center").props(f'data-kcm-url="{up._props.get("url", "")}"').style(
                         "flex:0 1 320px;min-width:250px;border:1px dashed var(--color-accent);border-radius:10px;padding:14px;justify-content:center;gap:10px"):
@@ -434,7 +455,7 @@ window.kcmSnip=function(){
                         with view:
                             if dd["mime"].startswith("image/"):
                                 ui.html(f'<img src="{url}" style="max-width:100%;max-height:78vh;object-fit:contain;border-radius:8px;'
-                                        f'background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.3)" alt="{dd["name"]}">')
+                                        f'background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.3)" alt="{html.escape(dd["name"], quote=True)}">')
                             elif dd["mime"] == "application/pdf":
                                 ui.html(f'<iframe src="{url}" style="width:100%;height:78vh;border:1px solid var(--color-divider);border-radius:8px;background:#fff"></iframe>')
                             else:
@@ -490,6 +511,13 @@ window.kcmSnip=function(){
                 f = getattr(e, "file", None)
                 name = f.name if f else e.name
                 raw = await f.read() if f else e.content.read()
+                # 서버 메모리 보호 — 붙여넣기·끌어놓기는 화면 쪽 제한을 거치지 않으므로 여기서도 막는다
+                if len(raw) > ocr.MAX_BYTES:
+                    ui.notify(f"{name}: 파일이 너무 큽니다 (최대 10MB).", type="warning")
+                    return
+                if len(st["docs"]) >= 12 or sum(len(d_.get("data") or b"") for d_ in st["docs"]) + len(raw) > 40 * 1024 * 1024:
+                    ui.notify("첨부가 너무 많습니다. 판독이 끝난 파일을 지우거나 '새 환자 시작'을 누르세요.", type="warning")
+                    return
                 mime = ocr.guess_mime(name, getattr(f, "content_type", "") if f else getattr(e, "type", ""))
                 item = {"name": name, "mime": mime, "data": raw, "sel": True, "state": "대기", "token": tmp_put(raw, mime)}
                 work.touch(st)
@@ -706,9 +734,8 @@ window.kcmSnip=function(){
                     render_ai_results()
                 with ui.row().classes("items-center gap-2"):
                     ui.label("보기 방식").classes("kcm-seglbl")
-                    ui.toggle({"card": "카드형", "list": "요약 목록"}, value=app.storage.user.get("ai_view", "card"),
-                              on_change=lambda e: set_ai_view(e.value)).props("dense no-caps unelevated toggle-color=primary").classes("kcm-segtg").tooltip(
-                        "눌러서 코드 후보를 카드(근거 포함) 또는 한 줄 요약 목록으로 바꿔 봅니다")
+                    seg_group({"card": ("view_module", "카드형"), "list": ("view_list", "요약 목록")}, app.storage.user.get("ai_view", "card"),
+                              set_ai_view, "눌러서 코드 후보를 카드(근거 포함) 또는 한 줄 요약 목록으로 바꿔 봅니다")
                 out = ui.column().classes("w-full gap-2 kcm-scroll")
                 with out:
                     ui.html('<div class="kcm-empty"><span style="font-size:26px">✦</span>‘AI 해석 실행’을 누르면<br>KCD 코드 후보가 여기에 나타납니다.</div>')
@@ -722,9 +749,9 @@ window.kcmSnip=function(){
                         save_ui_pref(doc_view=v)
                         render_doc()
                     ui.label("보기 방식").classes("kcm-seglbl")
-                    ui.toggle({"inline": "용어 옆", "lines": "줄 아래", "side": "좌우 비교"}, value=app.storage.user.get("doc_view", "lines"),
-                              on_change=lambda e: set_doc_view(e.value)).props("dense no-caps unelevated toggle-color=primary").classes("kcm-segtg").tooltip(
-                        "눌러서 원문과 한글 해석을 보여 주는 방식을 바꿉니다: 용어 옆 · 원문 줄 아래 · 좌우 비교")
+                    seg_group({"inline": ("edit_note", "용어 옆"), "lines": ("view_agenda", "줄 아래"), "side": ("vertical_split", "좌우 비교")},
+                              app.storage.user.get("doc_view", "lines"), set_doc_view,
+                              "눌러서 원문과 한글 해석을 보여 주는 방식을 바꿉니다: 용어 옆 · 원문 줄 아래 · 좌우 비교")
                     tr_btn = ui.button("AI 번역으로 보기", icon="translate", on_click=lambda: run_translate()).props("dense no-caps outline").style("color:var(--color-accent)").tooltip(
                         "줄 전체를 자연스러운 한글 문장으로 번역합니다(약 3~5초). 번역은 AI가 만든 참고용이며 줄 옆에 'AI' 표시가 붙습니다. 평소에는 용어를 한글로 바꿔 쓴 줄을 바로 보여 줍니다.")
                 with ui.column().classes("kcm-card w-full gap-2 kcm-scroll") as terms_panel:

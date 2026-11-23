@@ -6,6 +6,78 @@ from __future__ import annotations
 import re
 
 _RAW = """
+# ── 점검에서 보강한 약어 · 영문 · 구어 (먼저 적힌 공식명이 결과 앞에 온다 — 같은 입력어의 아래쪽 옛 항목보다 우선)
+esrd, 말기신부전, 말기신장병, 말기콩팥병, end stage renal disease: N18.5 | 만성 신장병 | 만성 신부전
+ckd, 만성신부전, 만성신장병, 만성콩팥병, chronic kidney disease: N18 | 만성 신장병 | 만성 신부전
+요로감염, uti, urinary tract infection: N39.0 | 요로감염 | 방광염
+방광염, cystitis: N30 | 방광염
+nstemi, 비st분절상승심근경색, 비st분절상승: I21.4 | 급성 심내막하 심근경색증 | 비ST분절상승
+stemi, st분절상승심근경색: I21.0 | I21.1 | I21.2 | I21.3 | 급성 투벽성 심근경색증
+pci, 경피적관상동맥중재술, 관상동맥중재술, 스텐트시술: I25 | 만성 허혈성 심장질환 | 관상동맥
+ards, 급성호흡곤란증후군, 급성호흡부전증후군: J80 | 성인호흡곤란증후군
+dvt, 심부정맥혈전증, deep vein thrombosis, 깊은정맥혈전증: I80.2 | I82 | 심부정맥혈전증 | 정맥혈전증
+ra, rheumatoid arthritis, 류마티스관절염, 류머티스관절염: M05 | M06 | 류마티스관절염
+sle, lupus, 루푸스, 전신홍반루푸스, 전신홍반성루푸스: M32 | 전신 홍반성 루푸스
+gi bleeding, gi bleed, gib, 위장관출혈, 소화기출혈, 소화관출혈: K92.2 | K92 | 위장관 출혈
+혈변, 하혈, 대변에피: K92.1 | K62.5 | K92.2 | 직장출혈 | 흑색변
+토혈, hematemesis: K92.0 | 토혈
+흑색변, melena: K92.1 | 흑색변
+숨참, 숨이참, 호흡곤란, dyspnea, sob, shortness of breath: R06 | 호흡곤란
+물혹, 낭종, cyst: 낭 | 낭종
+부종, 부음, edema: R60 | 부종
+두통, headache, 머리아픔: R51 | G44 | 두통
+편두통, migraine: G43 | 편두통
+지방간, fatty liver, 비알코올성지방간, nafld: K76.0 | 지방간
+간경변, 간경화, 간경변증, liver cirrhosis, cirrhosis: K74 | K70.3 | 간경변 | 간경화
+갑상선기능항진증, 갑상샘기능항진증, 그레이브스, graves, hyperthyroidism: E05 | 갑상선중독증 | 갑상선기능항진증
+부정맥, arrhythmia: I49 | I47 | I48 | 부정맥
+발목염좌, 발목삐끗, 발목접질림, ankle sprain: S93 | 발목 관절 및 인대의 염좌 | 발목의 염좌
+요추염좌, 허리염좌, 허리삐끗, 허리근육통, lumbar sprain: S33.5 | S33 | 요추 염좌
+뇌진탕, concussion: S06.0 | 뇌진탕
+폐결핵, tb, tuberculosis, 결핵: A15 | A16 | 호흡기결핵 | 결핵
+대퇴골골절, 대퇴골 골절, 대퇴경부골절, 고관절골절, 엉덩이뼈골절, femur fracture, hip fracture, fracture of femur: S72 | 대퇴골의 골절
+하지정맥류, varicose veins: I83 | 하지의 정맥류
+치질, 치핵, hemorrhoid, hemorrhoids, piles: K64 | 치핵
+신장결석, 신결석, 콩팥돌, kidney stone, renal stone, renal calculus: N20 | 신장결석 | 요로결석
+요로결석, 요석, urolithiasis: N20 | N21 | N22 | 요로결석
+회전근개, 어깨힘줄파열, rotator cuff: M75.1 | M75 | 회전근개
+쇄골골절, 빗장뼈골절, clavicle fracture: S42.0 | 쇄골
+손목골절, 요골원위부골절, colles, distal radius fracture: S52.5 | S52 | 아래팔의 골절
+폐기종, emphysema: J43 | 폐기종
+melanoma, 흑색종, 악성흑색종: C43 | 악성 흑색종
+bipolar, bipolar disorder, 양극성장애, 조울증: F31 | 양극성 정동장애
+hypothyroidism, 갑상선기능저하, 갑상샘기능저하, 갑상선기능저하증: E03 | 갑상선기능저하증
+urinary retention, 요폐, 요저류: R33 | 요저류
+일산화탄소중독, 연탄가스중독, co중독: T58 | 일산화탄소의 독작용
+불임, 불임증, infertility: N97 | 여성불임 | 불임
+뇌염, encephalitis: G04 | 뇌염 | A86
+단독, erysipelas: A46 | 단독
+십이지장궤양, duodenal ulcer: K26 | 십이지장궤양
+위궤양, gastric ulcer, 위의궤양: K25 | 위궤양
+소화성궤양, peptic ulcer: K27 | K25 | K26 | 소화성궤양
+족저근막염, 발바닥근막염, plantar fasciitis: M72.2 | 족저근막염
+acs, 급성관동맥증후군: I24 | I21 | I20.0 | 급성 심근경색증 | 불안정 협심증
+pad, 말초동맥질환, 말초동맥폐쇄질환: I73.9 | I70 | 말초혈관질환
+tia, 일과성허혈발작, 일과성뇌허혈: G45 | 일과성 뇌허혈
+ibd, 염증성장질환: K50 | K51 | 크론병 | 궤양성 대장염
+pid, 골반염증성질환, 골반염: N73 | N70 | N71 | 골반염
+mrsa, 메티실린내성황색포도알균: B95.6 | Z16.1 | 포도알균
+covid, covid19, 코로나, 코로나19, 코로나바이러스: U07 | U08 | U09 | 코로나-19
+용종, 폴립, polyp: 폴립 | 용종
+대장용종, 결장용종, 대장폴립: K63.5 | 결장의 폴립 | D12
+위용종: K31.7 | 위의 폴립
+서혜부탈장, 샅굴탈장: K40 | 서혜탈장
+조산, 조기진통: O60 | 조기 진통 | 조산
+유방낭종, 유방물혹: N60 | 유방의 낭
+총담관결석, 담관결석: K80.5 | K80.3 | 담관결석
+월경불순, 생리불순, 월경이상: N92 | N91 | 월경
+폐농양: J85 | 폐농양
+화농성관절염, 세균성관절염: M00 | 화농성 관절염
+복부대동맥류, 대동맥류: I71.4 | I71 | 대동맥류
+저혈압: I95 | 저혈압
+심방세동, afib, atrial fibrillation, af: I48 | 심방세동
+심부전, 심장부전, chf, heart failure, congestive heart failure: I50 | 심부전
+뇌졸중, 중풍, stroke, cva, 뇌혈관질환: I64 | I63 | I61 | 뇌졸중
 # ── 근골격 · 정형외과
 디스크, 허리디스크, 요추디스크, 추간판: M51 | M50 | 추간판장애 | 추간판전위
 목디스크, 경추디스크: M50 | 경추간판장애

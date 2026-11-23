@@ -21,6 +21,8 @@ TTL = 60  # 초 — 다른 PC에서 바꾼 값을 1분 안에 반영 (만료 후
 TTL_BY_KEY = {("global", "kcdMaster"): 3600, ("global", "ltTrees"): 3600}   # 크고 자주 안 바뀌는 데이터
 _refreshing: set[tuple[str, str]] = set()
 _lock = threading.Lock()
+last_error: tuple[float, str] | None = None     # 마지막 공용 DB 읽기 실패 (시각, 내용) — 점검·표시용
+_fail: dict[tuple[str, str], float] = {}        # 읽기에 실패한 키 → 이 시각까지는 다시 시도하지 않음
 
 # 접속을 재사용하는 공용 클라이언트 (요청마다 TLS 접속을 새로 만들지 않아 훨씬 빠르다)
 client = httpx.Client(timeout=30, limits=httpx.Limits(max_connections=24, max_keepalive_connections=12),
@@ -78,7 +80,15 @@ def get(scope: str, key: str, default: Any = None, fresh: bool = False) -> Any:
             return hit[1]
     if not configured():
         return default
-    return _fetch(scope, key, default)
+    if _fail.get(ck, 0) > time.time():        # 방금 실패했으면 몇 초 동안은 다시 접속하지 않고 바로 기본값 (화면마다 오래 기다리지 않게)
+        return hit[1] if hit else default
+    try:
+        return _fetch(scope, key, default)
+    except Exception as ex:  # noqa: BLE001      # 공용 DB가 잠깐 안 될 때 화면이 500 오류로 멈추지 않게 기본값으로 계속 간다
+        global last_error
+        last_error = (time.time(), f"{scope}/{key}: {type(ex).__name__}")
+        _fail[ck] = time.time() + 8
+        return hit[1] if hit else default
 
 
 def get_many(items: list[tuple[str, str, Any]], fresh: bool = False) -> list[Any]:
